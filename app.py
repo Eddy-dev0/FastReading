@@ -12,6 +12,13 @@ from tkinterdnd2 import DND_FILES, TkinterDnD
 
 SUPPORTED_EXTENSIONS = {".txt", ".pdf"}
 MAX_PDF_IMAGE_WIDTH = 760
+RSVP_TEXT = """Rapid Serial Visual Presentation, kurz RSVP, ist eine coole Technik, um Informationen schnell – Element für Element – an derselben Stelle auf dem Bildschirm anzuzeigen. Anstatt einen ganzen Absatz in Ihrem eigenen Tempo zu lesen, huschen Wörter (oder Bilder) schnell vorbei, meist im Zentrum Ihres Blickfelds. Es ähnelt Schnelllesen: Der Inhalt bewegt sich, nicht Ihre Augen. Das erleichtert die Informationsverarbeitung, ohne dass Sie scrollen oder Ihren Blick bewegen müssen.
+
+RSVP wird in psychologischen Experimenten zur Untersuchung von Aufmerksamkeit und Wahrnehmung eingesetzt, hat aber auch Eingang in Apps gefunden, die Ihnen helfen, schneller zu lesen oder Ihre Konzentration zu verbessern. Interessant an RSVP ist, dass es Forschern hilft zu verstehen, wie unser Gehirn mit sich schnell ändernden Informationen umgeht – zum Beispiel, wie lange es braucht, um etwas Wichtiges zu bemerken, oder wann wir Dinge „übersehen“, obwohl wir sie gesehen haben.
+
+Vielleicht haben Sie auch schon vom „Aufmerksamkeitsblinzeln“ bei RSVP gehört, einem kurzen Moment, in dem Ihr Gehirn sozusagen abschaltet und etwas übersieht, kurz nachdem es etwas anderes bemerkt hat. Es ist ein seltsamer, aber faszinierender Einblick in unsere Aufmerksamkeit. Insgesamt ist RSVP eine schnelle und unterhaltsame Möglichkeit, mehr über die Funktionsweise unseres Gehirns zu erfahren! Ich hoffe, euch gefällt das Video!"""
+RSVP_WPM = 300
+RSVP_INTERVAL_MS = int(60_000 / RSVP_WPM)
 
 
 @dataclass
@@ -51,9 +58,14 @@ class FastReadingApp:
         notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
 
         main_frame = ttk.Frame(notebook, padding=0)
-        empty_tab = ttk.Frame(notebook, padding=16)
+        rsvp_tab = tk.Frame(notebook, bg="black")
         notebook.add(main_frame, text="FastReading Import")
-        notebook.add(empty_tab, text="Empty Tab")
+        notebook.add(rsvp_tab, text="RSVP")
+
+        self.rsvp_words = RSVP_TEXT.split()
+        self.rsvp_word_index = 0
+        self.rsvp_after_id: str | None = None
+        self.build_rsvp_tab(rsvp_tab)
 
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(1, weight=1)
@@ -128,6 +140,103 @@ class FastReadingApp:
 
         status_label = ttk.Label(main_frame, textvariable=self.status, anchor="w")
         status_label.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+
+    def build_rsvp_tab(self, parent: tk.Frame) -> None:
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=1)
+
+        self.rsvp_canvas = tk.Canvas(parent, bg="black", highlightthickness=0, bd=0)
+        self.rsvp_canvas.grid(row=0, column=0, sticky="nsew")
+        self.rsvp_canvas.bind("<Configure>", self.draw_rsvp_view)
+
+        control_bar = tk.Frame(parent, bg="black")
+        control_bar.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
+        control_bar.columnconfigure(0, weight=1)
+
+        self.rsvp_button_text = tk.StringVar(value="Pause")
+        rsvp_button = tk.Button(
+            control_bar,
+            textvariable=self.rsvp_button_text,
+            command=self.toggle_rsvp_playback,
+            bg="#111111",
+            fg="white",
+            activebackground="#222222",
+            activeforeground="white",
+            relief="flat",
+            padx=18,
+            pady=8,
+        )
+        rsvp_button.grid(row=0, column=0)
+
+        self.rsvp_wpm_label = tk.Label(
+            control_bar,
+            text=f"{RSVP_WPM} wpm",
+            bg="black",
+            fg="#3a3a3a",
+            font=("Arial", 24, "italic"),
+        )
+        self.rsvp_wpm_label.grid(row=0, column=1, sticky="e", padx=(0, 32))
+
+        self.start_rsvp_playback()
+
+    def draw_rsvp_view(self, event: tk.Event | None = None) -> None:
+        canvas = self.rsvp_canvas
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 1)
+        height = max(canvas.winfo_height(), 1)
+        center_x = width / 2
+        center_y = height / 2
+
+        line_color = "#161616"
+        canvas.create_line(0, center_y - 92, width, center_y - 92, fill=line_color, width=5)
+        canvas.create_line(0, center_y + 92, width, center_y + 92, fill=line_color, width=5)
+        canvas.create_line(center_x, center_y - 92, center_x, center_y - 30, fill=line_color, width=5)
+        canvas.create_line(center_x, center_y + 30, center_x, center_y + 92, fill=line_color, width=5)
+
+        if not self.rsvp_words:
+            return
+        word = self.rsvp_words[self.rsvp_word_index % len(self.rsvp_words)]
+        pivot = self.get_rsvp_pivot_index(word)
+        before = word[:pivot]
+        pivot_char = word[pivot : pivot + 1]
+        after = word[pivot + 1 :]
+
+        font = ("Times New Roman", 58)
+        canvas.create_text(center_x, center_y, text=before, fill="white", font=font, anchor="e")
+        pivot_item = canvas.create_text(center_x, center_y, text=pivot_char, fill="#ff3045", font=font, anchor="w")
+        pivot_bbox = canvas.bbox(pivot_item)
+        after_x = pivot_bbox[2] if pivot_bbox else center_x
+        canvas.create_text(after_x, center_y, text=after, fill="white", font=font, anchor="w")
+
+    @staticmethod
+    def get_rsvp_pivot_index(word: str) -> int:
+        letters = [index for index, character in enumerate(word) if character.isalpha()]
+        if not letters:
+            return 0
+        return letters[min(len(letters) // 3, len(letters) - 1)]
+
+    def start_rsvp_playback(self) -> None:
+        self.rsvp_button_text.set("Pause")
+        if self.rsvp_after_id is None:
+            self.rsvp_after_id = self.root.after(RSVP_INTERVAL_MS, self.advance_rsvp_word)
+
+    def stop_rsvp_playback(self) -> None:
+        self.rsvp_button_text.set("Play")
+        if self.rsvp_after_id is not None:
+            self.root.after_cancel(self.rsvp_after_id)
+            self.rsvp_after_id = None
+
+    def toggle_rsvp_playback(self) -> None:
+        if self.rsvp_after_id is None:
+            self.start_rsvp_playback()
+        else:
+            self.stop_rsvp_playback()
+
+    def advance_rsvp_word(self) -> None:
+        self.rsvp_after_id = None
+        self.rsvp_word_index = (self.rsvp_word_index + 1) % max(len(self.rsvp_words), 1)
+        self.draw_rsvp_view()
+        self.start_rsvp_playback()
 
     def _register_drop_target(self) -> None:
         self.drop_frame.drop_target_register(DND_FILES)
@@ -225,13 +334,31 @@ class FastReadingApp:
             return
 
         selected_tag, _ = self.highlight_tags[self.selected_highlight_color.get()]
-        active_highlight_tag = self.get_covering_highlight_tag(start, end)
+        active_highlight_tag = self.get_highlight_tag_in_range(start, end)
         if active_highlight_tag:
             self.text_box.tag_remove(active_highlight_tag, start, end)
             self.status.set("Mark removed from the selected text.")
         else:
-            self.text_box.tag_add(selected_tag, start, end)
-            self.status.set(f"Selected text was marked in {self.selected_highlight_color.get().lower()}.")
+            self.add_letter_only_highlight(selected_tag, start, end)
+            self.status.set(f"Only letters were marked in {self.selected_highlight_color.get().lower()}.")
+
+    def add_letter_only_highlight(self, tag_name: str, start: str, end: str) -> None:
+        selected_text = self.text_box.get(start, end)
+        segment_start: str | None = None
+        current_index = start
+
+        for character in selected_text:
+            next_index = self.text_box.index(f"{current_index}+1c")
+            if character.isalpha():
+                if segment_start is None:
+                    segment_start = current_index
+            elif segment_start is not None:
+                self.text_box.tag_add(tag_name, segment_start, current_index)
+                segment_start = None
+            current_index = next_index
+
+        if segment_start is not None:
+            self.text_box.tag_add(tag_name, segment_start, current_index)
 
     def get_trimmed_selection_range(self, start: str, end: str) -> tuple[str | None, str | None]:
         selected_text = self.text_box.get(start, end)
@@ -246,14 +373,12 @@ class FastReadingApp:
             return None, None
         return trimmed_start, trimmed_end
 
-    def get_covering_highlight_tag(self, start: str, end: str) -> str | None:
+    def get_highlight_tag_in_range(self, start: str, end: str) -> str | None:
         for tag_name, _ in self.highlight_tags.values():
             tag_ranges = self.text_box.tag_ranges(tag_name)
-            if any(
-                self.text_box.compare(start, ">=", tag_start) and self.text_box.compare(end, "<=", tag_end)
-                for tag_start, tag_end in zip(tag_ranges[0::2], tag_ranges[1::2])
-            ):
-                return tag_name
+            for tag_start, tag_end in zip(tag_ranges[0::2], tag_ranges[1::2]):
+                if self.text_box.compare(tag_start, "<", end) and self.text_box.compare(tag_end, ">", start):
+                    return tag_name
         return None
 
     def append_document(self, path: Path, content: list[DocumentPart]) -> None:
