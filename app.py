@@ -12,12 +12,8 @@ from tkinterdnd2 import DND_FILES, TkinterDnD
 
 SUPPORTED_EXTENSIONS = {".txt", ".pdf"}
 MAX_PDF_IMAGE_WIDTH = 760
-RSVP_TEXT = """Rapid Serial Visual Presentation, kurz RSVP, ist eine coole Technik, um Informationen schnell – Element für Element – an derselben Stelle auf dem Bildschirm anzuzeigen. Anstatt einen ganzen Absatz in Ihrem eigenen Tempo zu lesen, huschen Wörter (oder Bilder) schnell vorbei, meist im Zentrum Ihres Blickfelds. Es ähnelt Schnelllesen: Der Inhalt bewegt sich, nicht Ihre Augen. Das erleichtert die Informationsverarbeitung, ohne dass Sie scrollen oder Ihren Blick bewegen müssen.
-
-RSVP wird in psychologischen Experimenten zur Untersuchung von Aufmerksamkeit und Wahrnehmung eingesetzt, hat aber auch Eingang in Apps gefunden, die Ihnen helfen, schneller zu lesen oder Ihre Konzentration zu verbessern. Interessant an RSVP ist, dass es Forschern hilft zu verstehen, wie unser Gehirn mit sich schnell ändernden Informationen umgeht – zum Beispiel, wie lange es braucht, um etwas Wichtiges zu bemerken, oder wann wir Dinge „übersehen“, obwohl wir sie gesehen haben.
-
-Vielleicht haben Sie auch schon vom „Aufmerksamkeitsblinzeln“ bei RSVP gehört, einem kurzen Moment, in dem Ihr Gehirn sozusagen abschaltet und etwas übersieht, kurz nachdem es etwas anderes bemerkt hat. Es ist ein seltsamer, aber faszinierender Einblick in unsere Aufmerksamkeit. Insgesamt ist RSVP eine schnelle und unterhaltsame Möglichkeit, mehr über die Funktionsweise unseres Gehirns zu erfahren! Ich hoffe, euch gefällt das Video!"""
-RSVP_WPM_PRESETS = [100, 150, 200, 250, 300, 350, 400, 600]
+RSVP_TEXT = """Import text in the FastReading Import tab to read it here with RSVP."""
+RSVP_WPM_PRESETS = list(range(100, 1001, 50))
 DEFAULT_RSVP_WPM = 300
 RSVP_PIVOT_OFFSET_PX = -4
 
@@ -66,7 +62,9 @@ class FastReadingApp:
         self.rsvp_words = RSVP_TEXT.split()
         self.rsvp_word_index = 0
         self.rsvp_after_id: str | None = None
+        self.rsvp_is_paused = tk.BooleanVar(value=False)
         self.rsvp_wpm = tk.IntVar(value=DEFAULT_RSVP_WPM)
+        self.rsvp_progress = tk.IntVar(value=0)
         self.rsvp_wpm_picker: tk.Toplevel | None = None
         self.build_rsvp_tab(rsvp_tab)
 
@@ -157,10 +155,10 @@ class FastReadingApp:
         control_bar.columnconfigure(0, weight=1)
 
         self.root.bind("<space>", self.handle_rsvp_space)
-        self.root.bind("<Left>", lambda event: self.change_rsvp_wpm(-50))
-        self.root.bind("<Right>", lambda event: self.change_rsvp_wpm(50))
-        self.root.bind("<Down>", lambda event: self.change_rsvp_wpm(-50))
-        self.root.bind("<Up>", lambda event: self.change_rsvp_wpm(50))
+        self.root.bind("<Left>", lambda event: self.change_rsvp_wpm(-25))
+        self.root.bind("<Right>", lambda event: self.change_rsvp_wpm(25))
+        self.root.bind("<Down>", lambda event: self.change_rsvp_wpm(-25))
+        self.root.bind("<Up>", lambda event: self.change_rsvp_wpm(25))
 
         self.rsvp_wpm_label = tk.Label(
             control_bar,
@@ -172,6 +170,27 @@ class FastReadingApp:
         self.rsvp_wpm_label.grid(row=0, column=1, sticky="e", padx=(0, 32))
         self.rsvp_wpm_label.bind("<Button-1>", self.open_rsvp_wpm_picker)
         self.rsvp_wpm_label.configure(cursor="hand2")
+
+        self.rsvp_progress_bar = tk.Scale(
+            parent,
+            from_=0,
+            to=max(len(self.rsvp_words) - 1, 0),
+            orient="horizontal",
+            variable=self.rsvp_progress,
+            command=self.seek_rsvp_word,
+            showvalue=False,
+            bg="black",
+            fg="#88E788",
+            troughcolor="black",
+            activebackground="#88E788",
+            highlightthickness=0,
+            bd=0,
+            sliderlength=72,
+            width=24,
+            relief="flat",
+        )
+        self.rsvp_progress_bar.grid(row=2, column=0, sticky="ew", padx=38, pady=(0, 22))
+        self.rsvp_progress_bar.grid_remove()
 
         self.start_rsvp_playback()
 
@@ -249,39 +268,38 @@ class FastReadingApp:
         picker = tk.Toplevel(self.root)
         self.rsvp_wpm_picker = picker
         picker.title("WPM")
-        picker.configure(bg="white")
+        picker.configure(bg="black")
         picker.resizable(False, False)
         picker.transient(self.root)
+        picker.overrideredirect(True)
 
-        x = self.rsvp_wpm_label.winfo_rootx()
-        y = self.rsvp_wpm_label.winfo_rooty() - 220
-        picker.geometry(f"180x560+{x}+{max(y, 0)}")
-
-        arrow_row = tk.Frame(picker, bg="white", highlightbackground="black", highlightthickness=4)
-        arrow_row.pack(fill="x")
-        up_button = tk.Button(arrow_row, text="△", font=("Arial", 28), bg="white", bd=0, command=lambda: self.change_rsvp_wpm(50))
-        down_button = tk.Button(arrow_row, text="▽", font=("Arial", 28), bg="white", bd=0, command=lambda: self.change_rsvp_wpm(-50))
-        up_button.pack(side="left", expand=True, fill="x")
-        down_button.pack(side="left", expand=True, fill="x")
+        width = 150
+        item_height = 44
+        height = item_height * len(RSVP_WPM_PRESETS)
+        x = self.rsvp_wpm_label.winfo_rootx() + self.rsvp_wpm_label.winfo_width() - width
+        y = self.rsvp_wpm_label.winfo_rooty() - height - 10
+        picker.geometry(f"{width}x{height}+{x}+{max(y, 0)}")
 
         for preset in sorted(RSVP_WPM_PRESETS, reverse=True):
             preset_button = tk.Button(
                 picker,
-                text=str(preset),
-                font=("Arial", 34),
-                bg="white",
-                activebackground="#eeeeee",
+                text=f"{preset} wpm",
+                font=("Arial", 24, "italic"),
+                fg="#4a4a4a" if preset != self.rsvp_wpm.get() else "white",
+                bg="black",
+                activeforeground="white",
+                activebackground="#151515",
                 bd=0,
-                highlightbackground="black",
-                highlightthickness=3,
+                highlightthickness=0,
+                relief="flat",
                 command=lambda selected=preset: self.choose_rsvp_wpm(selected),
             )
-            preset_button.pack(fill="x", ipady=6)
+            preset_button.pack(fill="x", ipady=2)
 
-        picker.bind("<Up>", lambda key_event: self.change_rsvp_wpm(50))
-        picker.bind("<Right>", lambda key_event: self.change_rsvp_wpm(50))
-        picker.bind("<Down>", lambda key_event: self.change_rsvp_wpm(-50))
-        picker.bind("<Left>", lambda key_event: self.change_rsvp_wpm(-50))
+        picker.bind("<Up>", lambda key_event: self.change_rsvp_wpm(25))
+        picker.bind("<Right>", lambda key_event: self.change_rsvp_wpm(25))
+        picker.bind("<Down>", lambda key_event: self.change_rsvp_wpm(-25))
+        picker.bind("<Left>", lambda key_event: self.change_rsvp_wpm(-25))
         picker.bind("<Escape>", lambda key_event: picker.destroy())
         picker.protocol("WM_DELETE_WINDOW", picker.destroy)
 
@@ -292,13 +310,32 @@ class FastReadingApp:
 
     def toggle_rsvp_playback(self) -> None:
         if self.rsvp_after_id is None:
+            self.rsvp_is_paused.set(False)
+            self.hide_rsvp_progress_bar()
             self.start_rsvp_playback()
         else:
             self.stop_rsvp_playback()
+            self.rsvp_is_paused.set(True)
+            self.show_rsvp_progress_bar()
+
+    def show_rsvp_progress_bar(self) -> None:
+        self.rsvp_progress_bar.configure(to=max(len(self.rsvp_words) - 1, 0))
+        self.rsvp_progress.set(self.rsvp_word_index)
+        self.rsvp_progress_bar.grid()
+
+    def hide_rsvp_progress_bar(self) -> None:
+        self.rsvp_progress_bar.grid_remove()
+
+    def seek_rsvp_word(self, value: str) -> None:
+        if not self.rsvp_is_paused.get():
+            return
+        self.rsvp_word_index = int(float(value))
+        self.draw_rsvp_view()
 
     def advance_rsvp_word(self) -> None:
         self.rsvp_after_id = None
         self.rsvp_word_index = (self.rsvp_word_index + 1) % max(len(self.rsvp_words), 1)
+        self.rsvp_progress.set(self.rsvp_word_index)
         self.draw_rsvp_view()
         self.start_rsvp_playback()
 
@@ -341,6 +378,7 @@ class FastReadingApp:
             imported_count += 1
 
         if imported_count:
+            self.refresh_rsvp_words_from_import()
             self.status.set(f"Successfully inserted {imported_count} file(s).")
         if errors:
             messagebox.showwarning("Import notes", "\n".join(errors))
@@ -458,6 +496,14 @@ class FastReadingApp:
         self.text_box.see("end")
         if not was_editing:
             self.text_box.configure(state="disabled")
+
+    def refresh_rsvp_words_from_import(self) -> None:
+        imported_text = self.text_box.get("1.0", "end-1c").strip()
+        self.rsvp_words = imported_text.split() or RSVP_TEXT.split()
+        self.rsvp_word_index = min(self.rsvp_word_index, max(len(self.rsvp_words) - 1, 0))
+        self.rsvp_progress_bar.configure(to=max(len(self.rsvp_words) - 1, 0))
+        self.rsvp_progress.set(self.rsvp_word_index)
+        self.draw_rsvp_view()
 
     def insert_pdf_image(self, image_data: str | bytes) -> None:
         if not isinstance(image_data, bytes):
