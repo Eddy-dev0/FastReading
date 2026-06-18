@@ -34,25 +34,32 @@ class FastReadingApp:
         self.status = tk.StringVar(value="Drop .txt or .pdf files into the field, or choose files manually.")
         self.is_editing = tk.BooleanVar(value=False)
         self.edit_button_text = tk.StringVar(value="EDIT")
+        self.selected_highlight_color = tk.StringVar(value="Yellow")
+        self.highlight_tags = {
+            "Yellow": ("highlight_yellow", "#fff59d"),
+            "Green": ("highlight_green", "#c8e6c9"),
+            "Blue": ("highlight_blue", "#bbdefb"),
+            "Pink": ("highlight_pink", "#f8bbd0"),
+            "Orange": ("highlight_orange", "#ffe0b2"),
+        }
         self.pdf_images: list[ImageTk.PhotoImage] = []
         self._build_layout()
         self._register_drop_target()
 
     def _build_layout(self) -> None:
-        main_frame = ttk.Frame(self.root, padding=16)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(2, weight=1)
+        notebook = ttk.Notebook(self.root)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
 
-        title = ttk.Label(
-            main_frame,
-            text="FastReading File Import",
-            font=("Arial", 18, "bold"),
-        )
-        title.grid(row=0, column=0, sticky="w", pady=(0, 12))
+        main_frame = ttk.Frame(notebook, padding=0)
+        empty_tab = ttk.Frame(notebook, padding=16)
+        notebook.add(main_frame, text="FastReading Import")
+        notebook.add(empty_tab, text="Empty Tab")
+
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(1, weight=1)
 
         self.drop_frame = ttk.LabelFrame(main_frame, text="Drag & Drop")
-        self.drop_frame.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        self.drop_frame.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.drop_frame.columnconfigure(0, weight=1)
 
         drop_label = ttk.Label(
@@ -77,7 +84,7 @@ class FastReadingApp:
         browse_button.grid(row=0, column=0)
 
         text_frame = ttk.LabelFrame(main_frame, text="Inserted Text")
-        text_frame.grid(row=2, column=0, sticky="nsew")
+        text_frame.grid(row=1, column=0, sticky="nsew")
         text_frame.columnconfigure(0, weight=1)
         text_frame.rowconfigure(1, weight=1)
 
@@ -93,23 +100,34 @@ class FastReadingApp:
         self.mark_button.grid(row=0, column=1, sticky="e", padx=(0, 8))
         self.mark_button.grid_remove()
 
+        self.color_picker = ttk.Combobox(
+            text_toolbar,
+            textvariable=self.selected_highlight_color,
+            values=list(self.highlight_tags),
+            state="readonly",
+            width=10,
+        )
+        self.color_picker.grid(row=0, column=2, sticky="e", padx=(0, 8))
+        self.color_picker.grid_remove()
+
         edit_button = ttk.Button(
             text_toolbar,
             textvariable=self.edit_button_text,
             command=self.toggle_edit_mode,
         )
-        edit_button.grid(row=0, column=2, sticky="e")
+        edit_button.grid(row=0, column=3, sticky="e")
 
         self.text_box = tk.Text(text_frame, wrap="word", undo=True, font=("Arial", 12))
         self.text_box.grid(row=1, column=0, sticky="nsew")
-        self.text_box.tag_configure("highlight", background="#fff59d")
+        for tag_name, color in self.highlight_tags.values():
+            self.text_box.tag_configure(tag_name, background=color)
 
         scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=self.text_box.yview)
         scrollbar.grid(row=1, column=1, sticky="ns")
         self.text_box.configure(state="disabled", yscrollcommand=scrollbar.set)
 
         status_label = ttk.Label(main_frame, textvariable=self.status, anchor="w")
-        status_label.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        status_label.grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
     def _register_drop_target(self) -> None:
         self.drop_frame.drop_target_register(DND_FILES)
@@ -185,10 +203,12 @@ class FastReadingApp:
         self.text_box.configure(state="normal" if is_editing else "disabled")
         if is_editing:
             self.mark_button.grid()
+            self.color_picker.grid()
             self.text_box.focus_set()
-            self.status.set("Edit mode is active: you can edit text or select text and click Mark.")
+            self.status.set("Edit mode is active: you can edit text or select text, choose a color, and click Mark.")
         else:
             self.mark_button.grid_remove()
+            self.color_picker.grid_remove()
             self.status.set("View mode is active: the text is protected from changes.")
 
     def toggle_selection_mark(self) -> None:
@@ -199,17 +219,42 @@ class FastReadingApp:
             self.status.set("Select text first, then click Mark.")
             return
 
-        tag_ranges = self.text_box.tag_ranges("highlight")
-        is_marked = any(
-            self.text_box.compare(start, ">=", tag_start) and self.text_box.compare(end, "<=", tag_end)
-            for tag_start, tag_end in zip(tag_ranges[0::2], tag_ranges[1::2])
-        )
-        if is_marked:
-            self.text_box.tag_remove("highlight", start, end)
+        start, end = self.get_trimmed_selection_range(start, end)
+        if start is None or end is None:
+            self.status.set("Select visible text first, then click Mark.")
+            return
+
+        selected_tag, _ = self.highlight_tags[self.selected_highlight_color.get()]
+        active_highlight_tag = self.get_covering_highlight_tag(start, end)
+        if active_highlight_tag:
+            self.text_box.tag_remove(active_highlight_tag, start, end)
             self.status.set("Mark removed from the selected text.")
         else:
-            self.text_box.tag_add("highlight", start, end)
-            self.status.set("Selected text was marked.")
+            self.text_box.tag_add(selected_tag, start, end)
+            self.status.set(f"Selected text was marked in {self.selected_highlight_color.get().lower()}.")
+
+    def get_trimmed_selection_range(self, start: str, end: str) -> tuple[str | None, str | None]:
+        selected_text = self.text_box.get(start, end)
+        leading_whitespace = len(selected_text) - len(selected_text.lstrip())
+        trailing_whitespace = len(selected_text) - len(selected_text.rstrip())
+        if leading_whitespace == len(selected_text):
+            return None, None
+
+        trimmed_start = self.text_box.index(f"{start}+{leading_whitespace}c")
+        trimmed_end = self.text_box.index(f"{end}-{trailing_whitespace}c")
+        if not self.text_box.compare(trimmed_start, "<", trimmed_end):
+            return None, None
+        return trimmed_start, trimmed_end
+
+    def get_covering_highlight_tag(self, start: str, end: str) -> str | None:
+        for tag_name, _ in self.highlight_tags.values():
+            tag_ranges = self.text_box.tag_ranges(tag_name)
+            if any(
+                self.text_box.compare(start, ">=", tag_start) and self.text_box.compare(end, "<=", tag_end)
+                for tag_start, tag_end in zip(tag_ranges[0::2], tag_ranges[1::2])
+            ):
+                return tag_name
+        return None
 
     def append_document(self, path: Path, content: list[DocumentPart]) -> None:
         was_editing = self.is_editing.get()
