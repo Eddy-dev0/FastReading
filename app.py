@@ -16,7 +16,8 @@ RSVP_TEXT = """Import text in the FastReading Import tab to read it here with RS
 RSVP_WPM_PRESETS = list(range(100, 1001, 50))
 DEFAULT_RSVP_WPM = 300
 RSVP_GUIDE_OFFSET_X_PX = 0
-RSVP_WORD_OFFSET_X_PX = -4
+RSVP_WORD_OFFSET_X_PX = -20
+RSVP_FULLSCREEN_WORD_OFFSET_X_PX = -4
 RSVP_WORD_OFFSET_Y_PX = 0
 RSVP_BASE_FONT_SIZE = 58
 RSVP_BASE_GUIDE_HALF_GAP_PX = 30
@@ -300,7 +301,10 @@ class FastReadingApp:
         scale = max(1.0, min(width / 640, height / 360))
         guide_x = (width / 2) + RSVP_GUIDE_OFFSET_X_PX
         guide_y = height / 2
-        word_x = guide_x + RSVP_WORD_OFFSET_X_PX
+        word_offset_x = (
+            RSVP_FULLSCREEN_WORD_OFFSET_X_PX if self.is_rsvp_fullscreen else RSVP_WORD_OFFSET_X_PX
+        )
+        word_x = guide_x + word_offset_x
         word_y = guide_y + RSVP_WORD_OFFSET_Y_PX
         guide_half_gap = RSVP_BASE_GUIDE_HALF_GAP_PX * scale
         guide_half_height = RSVP_BASE_GUIDE_HALF_HEIGHT_PX * scale
