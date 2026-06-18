@@ -20,6 +20,8 @@ class FastReadingApp:
         self.root.minsize(720, 480)
 
         self.status = tk.StringVar(value="Ziehe .txt- oder .pdf-Dateien in das Feld oder wähle Dateien aus.")
+        self.is_editing = tk.BooleanVar(value=False)
+        self.edit_button_text = tk.StringVar(value="EDIT")
         self._build_layout()
         self._register_drop_target()
 
@@ -64,14 +66,25 @@ class FastReadingApp:
         text_frame = ttk.LabelFrame(main_frame, text="Eingefügter Text")
         text_frame.grid(row=2, column=0, sticky="nsew")
         text_frame.columnconfigure(0, weight=1)
-        text_frame.rowconfigure(0, weight=1)
+        text_frame.rowconfigure(1, weight=1)
+
+        text_toolbar = ttk.Frame(text_frame)
+        text_toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 4))
+        text_toolbar.columnconfigure(0, weight=1)
+
+        edit_button = ttk.Button(
+            text_toolbar,
+            textvariable=self.edit_button_text,
+            command=self.toggle_edit_mode,
+        )
+        edit_button.grid(row=0, column=1, sticky="e")
 
         self.text_box = tk.Text(text_frame, wrap="word", undo=True, font=("Arial", 12))
-        self.text_box.grid(row=0, column=0, sticky="nsew")
+        self.text_box.grid(row=1, column=0, sticky="nsew")
 
         scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=self.text_box.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.text_box.configure(yscrollcommand=scrollbar.set)
+        scrollbar.grid(row=1, column=1, sticky="ns")
+        self.text_box.configure(state="disabled", yscrollcommand=scrollbar.set)
 
         status_label = ttk.Label(main_frame, textvariable=self.status, anchor="w")
         status_label.grid(row=3, column=0, sticky="ew", pady=(8, 0))
@@ -141,11 +154,26 @@ class FastReadingApp:
             pages.append(f"--- Seite {index} ---\n{page_text.strip()}")
         return "\n\n".join(pages).strip()
 
+    def toggle_edit_mode(self) -> None:
+        is_editing = not self.is_editing.get()
+        self.is_editing.set(is_editing)
+        self.edit_button_text.set("Bearbeitung beenden" if is_editing else "EDIT")
+        self.text_box.configure(state="normal" if is_editing else "disabled")
+        if is_editing:
+            self.text_box.focus_set()
+            self.status.set("Bearbeitungsmodus aktiv: Der Text kann jetzt geändert werden.")
+        else:
+            self.status.set("Anzeigemodus aktiv: Der Text ist vor Änderungen geschützt.")
+
     def append_document(self, path: Path, content: str) -> None:
+        was_editing = self.is_editing.get()
+        self.text_box.configure(state="normal")
         separator = "\n\n" if self.text_box.get("1.0", "end-1c") else ""
         document_text = f"{separator}===== {path.name} =====\n{content}\n"
         self.text_box.insert("end", document_text)
         self.text_box.see("end")
+        if not was_editing:
+            self.text_box.configure(state="disabled")
 
 
 def main() -> None:
