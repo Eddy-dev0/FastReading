@@ -17,7 +17,6 @@ RSVP_WPM_PRESETS = list(range(100, 1001, 50))
 DEFAULT_RSVP_WPM = 300
 RSVP_GUIDE_OFFSET_X_PX = 0
 RSVP_WORD_OFFSET_X_PX = -20
-RSVP_FULLSCREEN_WORD_OFFSET_X_PX = -4
 RSVP_WORD_OFFSET_Y_PX = 0
 RSVP_BASE_FONT_SIZE = 58
 RSVP_BASE_GUIDE_HALF_GAP_PX = 30
@@ -224,17 +223,14 @@ class FastReadingApp:
 
         fullscreen_frame = tk.Frame(self.root, bg="black")
         fullscreen_frame.pack(fill=tk.BOTH, expand=True)
-        fullscreen_frame.columnconfigure(0, weight=1)
-        fullscreen_frame.rowconfigure(0, weight=1)
         self.rsvp_fullscreen_frame = fullscreen_frame
 
         self.rsvp_canvas = tk.Canvas(fullscreen_frame, bg="black", highlightthickness=0, bd=0)
-        self.rsvp_canvas.grid(row=0, column=0, sticky="nsew")
+        self.rsvp_canvas.place(x=0, y=0, relwidth=1, relheight=1)
         self.rsvp_canvas.bind("<Configure>", self.draw_rsvp_view)
 
         fullscreen_controls = tk.Frame(fullscreen_frame, bg="black")
-        fullscreen_controls.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
-        fullscreen_controls.columnconfigure(0, weight=1)
+        fullscreen_controls.place(relx=1, rely=1, anchor="se", x=-56, y=-46)
         self.rsvp_wpm_label = tk.Label(
             fullscreen_controls,
             text=f"{self.rsvp_wpm.get()} wpm",
@@ -264,9 +260,8 @@ class FastReadingApp:
             width=24,
             relief="flat",
         )
-        self.rsvp_progress_bar.grid(row=2, column=0, sticky="ew", padx=38, pady=(0, 22))
-        if not self.rsvp_is_paused.get():
-            self.rsvp_progress_bar.grid_remove()
+        if self.rsvp_is_paused.get():
+            self.rsvp_progress_bar.place(relx=0.5, rely=1, anchor="s", relwidth=1, width=-76, y=-22)
 
         self.is_rsvp_fullscreen = True
         self.draw_rsvp_view()
@@ -328,15 +323,9 @@ class FastReadingApp:
         after_x = pivot_bbox[2] if pivot_bbox else word_x
         canvas.create_text(after_x, word_y, text=after, fill="white", font=font, anchor="w")
 
-    def get_rsvp_visual_center_y(self, canvas_height: int) -> float:
-        if not self.is_rsvp_fullscreen:
-            return canvas_height / 2
-
-        fullscreen_height = max(self.root.winfo_height(), self.root.winfo_screenheight())
-        if self.rsvp_fullscreen_frame is not None:
-            fullscreen_height = max(fullscreen_height, self.rsvp_fullscreen_frame.winfo_height())
-
-        return max(canvas_height / 2, fullscreen_height / 2)
+    @staticmethod
+    def get_rsvp_visual_center_y(canvas_height: int) -> float:
+        return canvas_height / 2
 
     @staticmethod
     def get_rsvp_pivot_index(word: str) -> int:
@@ -436,10 +425,16 @@ class FastReadingApp:
     def show_rsvp_progress_bar(self) -> None:
         self.rsvp_progress_bar.configure(to=max(len(self.rsvp_words) - 1, 0))
         self.rsvp_progress.set(self.rsvp_word_index)
-        self.rsvp_progress_bar.grid()
+        if self.is_rsvp_fullscreen:
+            self.rsvp_progress_bar.place(relx=0.5, rely=1, anchor="s", relwidth=1, width=-76, y=-22)
+        else:
+            self.rsvp_progress_bar.grid()
 
     def hide_rsvp_progress_bar(self) -> None:
-        self.rsvp_progress_bar.grid_remove()
+        if self.is_rsvp_fullscreen:
+            self.rsvp_progress_bar.place_forget()
+        else:
+            self.rsvp_progress_bar.grid_remove()
 
     def seek_rsvp_word(self, value: str) -> None:
         if not self.rsvp_is_paused.get():
