@@ -299,7 +299,7 @@ class FastReadingApp:
         height = max(canvas.winfo_height(), 1)
         scale = max(1.0, min(width / 640, height / 360))
         guide_x = (width / 2) + RSVP_GUIDE_OFFSET_X_PX
-        guide_y = height / 2
+        guide_y = self.get_rsvp_visual_center_y(height)
         word_x = guide_x + RSVP_WORD_OFFSET_X_PX
         word_y = guide_y + RSVP_WORD_OFFSET_Y_PX
         guide_half_gap = RSVP_BASE_GUIDE_HALF_GAP_PX * scale
@@ -326,6 +326,16 @@ class FastReadingApp:
         pivot_bbox = canvas.bbox(pivot_item)
         after_x = pivot_bbox[2] if pivot_bbox else word_x
         canvas.create_text(after_x, word_y, text=after, fill="white", font=font, anchor="w")
+
+    def get_rsvp_visual_center_y(self, canvas_height: int) -> float:
+        if not self.is_rsvp_fullscreen:
+            return canvas_height / 2
+
+        fullscreen_height = max(self.root.winfo_height(), self.root.winfo_screenheight())
+        if self.rsvp_fullscreen_frame is not None:
+            fullscreen_height = max(fullscreen_height, self.rsvp_fullscreen_frame.winfo_height())
+
+        return max(canvas_height / 2, fullscreen_height / 2)
 
     @staticmethod
     def get_rsvp_pivot_index(word: str) -> int:
