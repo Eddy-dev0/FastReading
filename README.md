@@ -27,6 +27,6 @@ python app.py
 5. Click **EDIT** to edit the text. The **Mark** button and color picker appear next to it.
 6. Choose a highlight color, select text, and click **Mark** to highlight only letters. Spaces, numbers, punctuation, line gaps, and other non-letter characters stay unmarked, so no large color blocks appear between words or lines. Select an already highlighted area and click **Mark** again to remove that highlight.
 7. Use the top tabs to switch between **FastReading Import** and the **RSVP** tab.
-8. The **RSVP** tab shows the included RSVP explanation as one word at a time on a black background with dark guide lines, a red pivot letter, a pause/play button, and a 300 wpm indicator.
+8. The **RSVP** tab reads the text imported in **FastReading Import** one word at a time on a black background with dark guide lines, a red pivot letter, and a 300 wpm indicator. Click the wpm indicator to open a clean upward wpm picker. Use arrow keys to adjust the speed by 25 wpm. Press Space to pause and reveal the green seek bar for scrubbing through the imported text.
 9. Imported PDF images are displayed inline in the inserted-text box when they can be extracted from the PDF.
 10. Click **DONE** to return to protected view mode.
