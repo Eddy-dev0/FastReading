@@ -1,6 +1,6 @@
 # FastReading
 
-FastReading ist eine kleine Tkinter-Anwendung, mit der `.txt`- und `.pdf`-Dateien per Drag & Drop oder Dateiauswahl importiert werden können. Der extrahierte Text wird in einer Textbox unterhalb des Importbereichs angezeigt. Standardmäßig ist die Textbox schreibgeschützt; über den **EDIT**-Button kann der Bearbeitungsmodus ein- und ausgeschaltet werden.
+FastReading is a small Tkinter application for importing `.txt` and `.pdf` files by drag and drop or by file picker. Extracted text is shown in the reading box below the import area. The box is read-only by default; use the **EDIT** button to switch editing on and reveal extra editing tools.
 
 ## Installation
 
@@ -10,7 +10,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> Hinweis: Tkinter muss auf dem System verfügbar sein. Unter Debian/Ubuntu kann dafür z. B. `python3-tk` nötig sein.
+> Note: Tkinter must be available on your system. On Debian/Ubuntu, you may need to install `python3-tk`.
 
 ## Start
 
@@ -18,10 +18,13 @@ pip install -r requirements.txt
 python app.py
 ```
 
-## Nutzung
+## Usage
 
-1. Starte die Anwendung.
-2. Ziehe eine oder mehrere `.txt`- oder `.pdf`-Dateien in das Drag-&-Drop-Feld.
-3. Alternativ kannst du über **Dateien auswählen** Dateien öffnen.
-4. Der erkannte Text erscheint in der darunterliegenden Textbox zunächst im geschützten Anzeigemodus.
-5. Klicke auf **EDIT**, um den Text im Fenster zu bearbeiten; mit **Bearbeitung beenden** wird er wieder schreibgeschützt angezeigt.
+1. Start the application.
+2. Drag one or more `.txt` or `.pdf` files into the drag-and-drop area.
+3. Alternatively, open files with **Choose files**.
+4. Recognized text appears in the inserted-text box in protected view mode.
+5. Click **EDIT** to edit the text. The **Mark** button appears next to it.
+6. Select text and click **Mark** to highlight it. Select an already highlighted area and click **Mark** again to remove that highlight.
+7. Imported PDF images are displayed inline in the inserted-text box when they can be extracted from the PDF.
+8. Click **DONE** to return to protected view mode.
