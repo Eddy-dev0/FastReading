@@ -15,7 +15,12 @@ MAX_PDF_IMAGE_WIDTH = 760
 RSVP_TEXT = """Import text in the FastReading Import tab to read it here with RSVP."""
 RSVP_WPM_PRESETS = list(range(100, 1001, 50))
 DEFAULT_RSVP_WPM = 300
-RSVP_PIVOT_OFFSET_PX = -4
+RSVP_GUIDE_OFFSET_X_PX = 0
+RSVP_WORD_OFFSET_X_PX = -4
+RSVP_WORD_OFFSET_Y_PX = 0
+RSVP_BASE_FONT_SIZE = 58
+RSVP_BASE_GUIDE_HALF_GAP_PX = 30
+RSVP_BASE_GUIDE_HALF_HEIGHT_PX = 92
 
 
 @dataclass
@@ -51,7 +56,12 @@ class FastReadingApp:
         self._register_drop_target()
 
     def _build_layout(self) -> None:
+        self.is_rsvp_fullscreen = False
+        self.rsvp_fullscreen_frame: tk.Frame | None = None
+        self.rsvp_windowed_widgets: tuple[tk.Canvas, tk.Label, tk.Scale] | None = None
+
         notebook = ttk.Notebook(self.root)
+        self.notebook = notebook
         notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
 
         main_frame = ttk.Frame(notebook, padding=0)
@@ -159,6 +169,9 @@ class FastReadingApp:
         self.root.bind("<Right>", lambda event: self.change_rsvp_wpm(25))
         self.root.bind("<Down>", lambda event: self.change_rsvp_wpm(-25))
         self.root.bind("<Up>", lambda event: self.change_rsvp_wpm(25))
+        self.root.bind("<f>", self.toggle_rsvp_fullscreen)
+        self.root.bind("<F>", self.toggle_rsvp_fullscreen)
+        self.root.bind("<Escape>", self.exit_rsvp_fullscreen)
 
         self.rsvp_wpm_label = tk.Label(
             control_bar,
@@ -194,19 +207,110 @@ class FastReadingApp:
 
         self.start_rsvp_playback()
 
+
+    def toggle_rsvp_fullscreen(self, event: tk.Event | None = None) -> str:
+        if self.is_rsvp_fullscreen:
+            return self.exit_rsvp_fullscreen(event)
+        return self.enter_rsvp_fullscreen()
+
+    def enter_rsvp_fullscreen(self) -> str:
+        if self.is_rsvp_fullscreen:
+            return "break"
+
+        self.rsvp_windowed_widgets = (self.rsvp_canvas, self.rsvp_wpm_label, self.rsvp_progress_bar)
+        self.notebook.pack_forget()
+        self.root.attributes("-fullscreen", True)
+
+        fullscreen_frame = tk.Frame(self.root, bg="black")
+        fullscreen_frame.pack(fill=tk.BOTH, expand=True)
+        fullscreen_frame.columnconfigure(0, weight=1)
+        fullscreen_frame.rowconfigure(0, weight=1)
+        self.rsvp_fullscreen_frame = fullscreen_frame
+
+        self.rsvp_canvas = tk.Canvas(fullscreen_frame, bg="black", highlightthickness=0, bd=0)
+        self.rsvp_canvas.grid(row=0, column=0, sticky="nsew")
+        self.rsvp_canvas.bind("<Configure>", self.draw_rsvp_view)
+
+        fullscreen_controls = tk.Frame(fullscreen_frame, bg="black")
+        fullscreen_controls.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
+        fullscreen_controls.columnconfigure(0, weight=1)
+        self.rsvp_wpm_label = tk.Label(
+            fullscreen_controls,
+            text=f"{self.rsvp_wpm.get()} wpm",
+            bg="black",
+            fg="#3a3a3a",
+            font=("Arial", 24, "italic"),
+        )
+        self.rsvp_wpm_label.grid(row=0, column=1, sticky="e", padx=(0, 32))
+        self.rsvp_wpm_label.bind("<Button-1>", self.open_rsvp_wpm_picker)
+        self.rsvp_wpm_label.configure(cursor="hand2")
+
+        self.rsvp_progress_bar = tk.Scale(
+            fullscreen_frame,
+            from_=0,
+            to=max(len(self.rsvp_words) - 1, 0),
+            orient="horizontal",
+            variable=self.rsvp_progress,
+            command=self.seek_rsvp_word,
+            showvalue=False,
+            bg="black",
+            fg="#88E788",
+            troughcolor="black",
+            activebackground="#88E788",
+            highlightthickness=0,
+            bd=0,
+            sliderlength=72,
+            width=24,
+            relief="flat",
+        )
+        self.rsvp_progress_bar.grid(row=2, column=0, sticky="ew", padx=38, pady=(0, 22))
+        if not self.rsvp_is_paused.get():
+            self.rsvp_progress_bar.grid_remove()
+
+        self.is_rsvp_fullscreen = True
+        self.draw_rsvp_view()
+        return "break"
+
+    def exit_rsvp_fullscreen(self, event: tk.Event | None = None) -> str:
+        if not self.is_rsvp_fullscreen:
+            return "break"
+
+        if self.rsvp_fullscreen_frame is not None:
+            self.rsvp_fullscreen_frame.destroy()
+            self.rsvp_fullscreen_frame = None
+        if self.rsvp_windowed_widgets is not None:
+            self.rsvp_canvas, self.rsvp_wpm_label, self.rsvp_progress_bar = self.rsvp_windowed_widgets
+            self.rsvp_windowed_widgets = None
+
+        self.root.attributes("-fullscreen", False)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
+        if self.rsvp_is_paused.get():
+            self.rsvp_progress_bar.grid()
+        else:
+            self.rsvp_progress_bar.grid_remove()
+        self.is_rsvp_fullscreen = False
+        self.draw_rsvp_view()
+        return "break"
+
     def draw_rsvp_view(self, event: tk.Event | None = None) -> None:
         canvas = self.rsvp_canvas
         canvas.delete("all")
         width = max(canvas.winfo_width(), 1)
         height = max(canvas.winfo_height(), 1)
-        center_x = (width / 2) + RSVP_PIVOT_OFFSET_PX
-        center_y = height / 2
+        scale = max(1.0, min(width / 640, height / 360))
+        guide_x = (width / 2) + RSVP_GUIDE_OFFSET_X_PX
+        guide_y = height / 2
+        word_x = guide_x + RSVP_WORD_OFFSET_X_PX
+        word_y = guide_y + RSVP_WORD_OFFSET_Y_PX
+        guide_half_gap = RSVP_BASE_GUIDE_HALF_GAP_PX * scale
+        guide_half_height = RSVP_BASE_GUIDE_HALF_HEIGHT_PX * scale
+        guide_width = max(5, round(5 * scale))
 
         line_color = "#161616"
-        canvas.create_line(0, center_y - 92, width, center_y - 92, fill=line_color, width=5)
-        canvas.create_line(0, center_y + 92, width, center_y + 92, fill=line_color, width=5)
-        canvas.create_line(center_x, center_y - 92, center_x, center_y - 30, fill=line_color, width=5)
-        canvas.create_line(center_x, center_y + 30, center_x, center_y + 92, fill=line_color, width=5)
+        canvas.create_line(0, guide_y - guide_half_height, width, guide_y - guide_half_height, fill=line_color, width=guide_width)
+        canvas.create_line(0, guide_y + guide_half_height, width, guide_y + guide_half_height, fill=line_color, width=guide_width)
+        canvas.create_line(guide_x, guide_y - guide_half_height, guide_x, guide_y - guide_half_gap, fill=line_color, width=guide_width)
+        canvas.create_line(guide_x, guide_y + guide_half_gap, guide_x, guide_y + guide_half_height, fill=line_color, width=guide_width)
 
         if not self.rsvp_words:
             return
@@ -216,12 +320,12 @@ class FastReadingApp:
         pivot_char = word[pivot : pivot + 1]
         after = word[pivot + 1 :]
 
-        font = ("Times New Roman", 58)
-        canvas.create_text(center_x, center_y, text=before, fill="white", font=font, anchor="e")
-        pivot_item = canvas.create_text(center_x, center_y, text=pivot_char, fill="#ff3045", font=font, anchor="w")
+        font = ("Times New Roman", round(RSVP_BASE_FONT_SIZE * scale))
+        canvas.create_text(word_x, word_y, text=before, fill="white", font=font, anchor="e")
+        pivot_item = canvas.create_text(word_x, word_y, text=pivot_char, fill="#ff3045", font=font, anchor="w")
         pivot_bbox = canvas.bbox(pivot_item)
-        after_x = pivot_bbox[2] if pivot_bbox else center_x
-        canvas.create_text(after_x, center_y, text=after, fill="white", font=font, anchor="w")
+        after_x = pivot_bbox[2] if pivot_bbox else word_x
+        canvas.create_text(after_x, word_y, text=after, fill="white", font=font, anchor="w")
 
     @staticmethod
     def get_rsvp_pivot_index(word: str) -> int:
