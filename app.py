@@ -17,8 +17,9 @@ RSVP_TEXT = """Rapid Serial Visual Presentation, kurz RSVP, ist eine coole Techn
 RSVP wird in psychologischen Experimenten zur Untersuchung von Aufmerksamkeit und Wahrnehmung eingesetzt, hat aber auch Eingang in Apps gefunden, die Ihnen helfen, schneller zu lesen oder Ihre Konzentration zu verbessern. Interessant an RSVP ist, dass es Forschern hilft zu verstehen, wie unser Gehirn mit sich schnell ändernden Informationen umgeht – zum Beispiel, wie lange es braucht, um etwas Wichtiges zu bemerken, oder wann wir Dinge „übersehen“, obwohl wir sie gesehen haben.
 
 Vielleicht haben Sie auch schon vom „Aufmerksamkeitsblinzeln“ bei RSVP gehört, einem kurzen Moment, in dem Ihr Gehirn sozusagen abschaltet und etwas übersieht, kurz nachdem es etwas anderes bemerkt hat. Es ist ein seltsamer, aber faszinierender Einblick in unsere Aufmerksamkeit. Insgesamt ist RSVP eine schnelle und unterhaltsame Möglichkeit, mehr über die Funktionsweise unseres Gehirns zu erfahren! Ich hoffe, euch gefällt das Video!"""
-RSVP_WPM = 300
-RSVP_INTERVAL_MS = int(60_000 / RSVP_WPM)
+RSVP_WPM_PRESETS = [100, 150, 200, 250, 300, 350, 400, 600]
+DEFAULT_RSVP_WPM = 300
+RSVP_PIVOT_OFFSET_PX = -4
 
 
 @dataclass
@@ -65,6 +66,8 @@ class FastReadingApp:
         self.rsvp_words = RSVP_TEXT.split()
         self.rsvp_word_index = 0
         self.rsvp_after_id: str | None = None
+        self.rsvp_wpm = tk.IntVar(value=DEFAULT_RSVP_WPM)
+        self.rsvp_wpm_picker: tk.Toplevel | None = None
         self.build_rsvp_tab(rsvp_tab)
 
         main_frame.columnconfigure(0, weight=1)
@@ -153,29 +156,22 @@ class FastReadingApp:
         control_bar.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
         control_bar.columnconfigure(0, weight=1)
 
-        self.rsvp_button_text = tk.StringVar(value="Pause")
-        rsvp_button = tk.Button(
-            control_bar,
-            textvariable=self.rsvp_button_text,
-            command=self.toggle_rsvp_playback,
-            bg="#111111",
-            fg="white",
-            activebackground="#222222",
-            activeforeground="white",
-            relief="flat",
-            padx=18,
-            pady=8,
-        )
-        rsvp_button.grid(row=0, column=0)
+        self.root.bind("<space>", self.handle_rsvp_space)
+        self.root.bind("<Left>", lambda event: self.change_rsvp_wpm(-50))
+        self.root.bind("<Right>", lambda event: self.change_rsvp_wpm(50))
+        self.root.bind("<Down>", lambda event: self.change_rsvp_wpm(-50))
+        self.root.bind("<Up>", lambda event: self.change_rsvp_wpm(50))
 
         self.rsvp_wpm_label = tk.Label(
             control_bar,
-            text=f"{RSVP_WPM} wpm",
+            text=f"{self.rsvp_wpm.get()} wpm",
             bg="black",
             fg="#3a3a3a",
             font=("Arial", 24, "italic"),
         )
         self.rsvp_wpm_label.grid(row=0, column=1, sticky="e", padx=(0, 32))
+        self.rsvp_wpm_label.bind("<Button-1>", self.open_rsvp_wpm_picker)
+        self.rsvp_wpm_label.configure(cursor="hand2")
 
         self.start_rsvp_playback()
 
@@ -184,7 +180,7 @@ class FastReadingApp:
         canvas.delete("all")
         width = max(canvas.winfo_width(), 1)
         height = max(canvas.winfo_height(), 1)
-        center_x = width / 2
+        center_x = (width / 2) + RSVP_PIVOT_OFFSET_PX
         center_y = height / 2
 
         line_color = "#161616"
@@ -216,15 +212,83 @@ class FastReadingApp:
         return letters[min(len(letters) // 3, len(letters) - 1)]
 
     def start_rsvp_playback(self) -> None:
-        self.rsvp_button_text.set("Pause")
         if self.rsvp_after_id is None:
-            self.rsvp_after_id = self.root.after(RSVP_INTERVAL_MS, self.advance_rsvp_word)
+            self.rsvp_after_id = self.root.after(self.get_rsvp_interval_ms(), self.advance_rsvp_word)
 
     def stop_rsvp_playback(self) -> None:
-        self.rsvp_button_text.set("Play")
         if self.rsvp_after_id is not None:
             self.root.after_cancel(self.rsvp_after_id)
             self.rsvp_after_id = None
+
+    def handle_rsvp_space(self, event: tk.Event) -> str:
+        self.toggle_rsvp_playback()
+        return "break"
+
+    def get_rsvp_interval_ms(self) -> int:
+        return int(60_000 / max(self.rsvp_wpm.get(), 1))
+
+    def change_rsvp_wpm(self, amount: int) -> str:
+        self.set_rsvp_wpm(self.rsvp_wpm.get() + amount)
+        return "break"
+
+    def set_rsvp_wpm(self, value: int) -> None:
+        minimum = RSVP_WPM_PRESETS[0]
+        maximum = RSVP_WPM_PRESETS[-1]
+        new_value = max(minimum, min(maximum, value))
+        self.rsvp_wpm.set(new_value)
+        self.rsvp_wpm_label.configure(text=f"{new_value} wpm")
+        if self.rsvp_after_id is not None:
+            self.stop_rsvp_playback()
+            self.start_rsvp_playback()
+
+    def open_rsvp_wpm_picker(self, event: tk.Event | None = None) -> None:
+        if self.rsvp_wpm_picker is not None and self.rsvp_wpm_picker.winfo_exists():
+            self.rsvp_wpm_picker.lift()
+            return
+
+        picker = tk.Toplevel(self.root)
+        self.rsvp_wpm_picker = picker
+        picker.title("WPM")
+        picker.configure(bg="white")
+        picker.resizable(False, False)
+        picker.transient(self.root)
+
+        x = self.rsvp_wpm_label.winfo_rootx()
+        y = self.rsvp_wpm_label.winfo_rooty() - 220
+        picker.geometry(f"180x560+{x}+{max(y, 0)}")
+
+        arrow_row = tk.Frame(picker, bg="white", highlightbackground="black", highlightthickness=4)
+        arrow_row.pack(fill="x")
+        up_button = tk.Button(arrow_row, text="△", font=("Arial", 28), bg="white", bd=0, command=lambda: self.change_rsvp_wpm(50))
+        down_button = tk.Button(arrow_row, text="▽", font=("Arial", 28), bg="white", bd=0, command=lambda: self.change_rsvp_wpm(-50))
+        up_button.pack(side="left", expand=True, fill="x")
+        down_button.pack(side="left", expand=True, fill="x")
+
+        for preset in sorted(RSVP_WPM_PRESETS, reverse=True):
+            preset_button = tk.Button(
+                picker,
+                text=str(preset),
+                font=("Arial", 34),
+                bg="white",
+                activebackground="#eeeeee",
+                bd=0,
+                highlightbackground="black",
+                highlightthickness=3,
+                command=lambda selected=preset: self.choose_rsvp_wpm(selected),
+            )
+            preset_button.pack(fill="x", ipady=6)
+
+        picker.bind("<Up>", lambda key_event: self.change_rsvp_wpm(50))
+        picker.bind("<Right>", lambda key_event: self.change_rsvp_wpm(50))
+        picker.bind("<Down>", lambda key_event: self.change_rsvp_wpm(-50))
+        picker.bind("<Left>", lambda key_event: self.change_rsvp_wpm(-50))
+        picker.bind("<Escape>", lambda key_event: picker.destroy())
+        picker.protocol("WM_DELETE_WINDOW", picker.destroy)
+
+    def choose_rsvp_wpm(self, value: int) -> None:
+        self.set_rsvp_wpm(value)
+        if self.rsvp_wpm_picker is not None and self.rsvp_wpm_picker.winfo_exists():
+            self.rsvp_wpm_picker.destroy()
 
     def toggle_rsvp_playback(self) -> None:
         if self.rsvp_after_id is None:
