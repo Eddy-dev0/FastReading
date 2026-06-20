@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+import re
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -21,6 +22,13 @@ RSVP_WORD_OFFSET_Y_PX = 0
 RSVP_BASE_FONT_SIZE = 58
 RSVP_BASE_GUIDE_HALF_GAP_PX = 30
 RSVP_BASE_GUIDE_HALF_HEIGHT_PX = 92
+RSVP_SENTENCE_PAUSE_DURATIONS_MS = {
+    "1 second": 1_000,
+    "2 seconds": 2_000,
+    "5 seconds": 5_000,
+    "10 seconds": 10_000,
+}
+RSVP_MANUAL_SENTENCE_PAUSE = "Until Space is pressed"
 
 
 @dataclass
@@ -44,6 +52,9 @@ class FastReadingApp:
         self.is_editing = tk.BooleanVar(value=False)
         self.edit_button_text = tk.StringVar(value="EDIT")
         self.selected_highlight_color = tk.StringVar(value="Yellow")
+        self.rsvp_sentence_pause_mode = tk.StringVar(value=RSVP_MANUAL_SENTENCE_PAUSE)
+        self.rsvp_sentence_pause_flags: list[bool] = []
+        self.rsvp_is_sentence_pause = False
         self.highlight_tags = {
             "Yellow": ("highlight_yellow", "#fff59d"),
             "Green": ("highlight_green", "#c8e6c9"),
@@ -67,10 +78,12 @@ class FastReadingApp:
 
         main_frame = ttk.Frame(notebook, padding=0)
         rsvp_tab = tk.Frame(notebook, bg="black")
+        settings_tab = ttk.Frame(notebook, padding=24)
         notebook.add(main_frame, text="FastReading Import")
         notebook.add(rsvp_tab, text="RSVP")
+        notebook.add(settings_tab, text="Settings")
 
-        self.rsvp_words = RSVP_TEXT.split()
+        self.rsvp_words, self.rsvp_sentence_pause_flags = self.build_rsvp_tokens(RSVP_TEXT)
         self.rsvp_word_index = 0
         self.rsvp_after_id: str | None = None
         self.rsvp_is_paused = tk.BooleanVar(value=False)
@@ -78,6 +91,7 @@ class FastReadingApp:
         self.rsvp_progress = tk.IntVar(value=0)
         self.rsvp_wpm_picker: tk.Toplevel | None = None
         self.build_rsvp_tab(rsvp_tab)
+        self.build_settings_tab(settings_tab)
 
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(1, weight=1)
@@ -149,9 +163,37 @@ class FastReadingApp:
         scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=self.text_box.yview)
         scrollbar.grid(row=1, column=1, sticky="ns")
         self.text_box.configure(state="disabled", yscrollcommand=scrollbar.set)
+        self.text_box.bind("<<Modified>>", self.handle_text_modified)
 
         status_label = ttk.Label(main_frame, textvariable=self.status, anchor="w")
         status_label.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+
+    def build_settings_tab(self, parent: ttk.Frame) -> None:
+        parent.columnconfigure(0, weight=1)
+        pause_frame = ttk.LabelFrame(parent, text="Pause")
+        pause_frame.grid(row=0, column=0, sticky="ew")
+        pause_frame.columnconfigure(0, weight=1)
+
+        description = ttk.Label(
+            pause_frame,
+            text=(
+                "Choose what RSVP should do at sentence endings. "
+                "A sentence ending is detected after ., ?, or ! only when the next non-space "
+                "character is uppercase."
+            ),
+            wraplength=720,
+            justify="left",
+        )
+        description.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 8))
+
+        options = [RSVP_MANUAL_SENTENCE_PAUSE, *RSVP_SENTENCE_PAUSE_DURATIONS_MS]
+        for row, option in enumerate(options, start=1):
+            ttk.Radiobutton(
+                pause_frame,
+                text=option,
+                value=option,
+                variable=self.rsvp_sentence_pause_mode,
+            ).grid(row=row, column=0, sticky="w", padx=12, pady=3)
 
     def build_rsvp_tab(self, parent: tk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -360,7 +402,9 @@ class FastReadingApp:
             self.root.after_cancel(self.rsvp_after_id)
             self.rsvp_after_id = None
 
-    def handle_rsvp_space(self, event: tk.Event) -> str:
+    def handle_rsvp_space(self, event: tk.Event) -> str | None:
+        if event.widget == self.text_box:
+            return None
         self.toggle_rsvp_playback()
         return "break"
 
@@ -431,11 +475,16 @@ class FastReadingApp:
 
     def toggle_rsvp_playback(self) -> None:
         if self.rsvp_after_id is None:
+            if self.rsvp_is_sentence_pause:
+                self.advance_rsvp_word_after_pause()
+                return
+            self.rsvp_is_sentence_pause = False
             self.rsvp_is_paused.set(False)
             self.hide_rsvp_progress_bar()
             self.start_rsvp_playback()
         else:
             self.stop_rsvp_playback()
+            self.rsvp_is_sentence_pause = False
             self.rsvp_is_paused.set(True)
             self.show_rsvp_progress_bar()
 
@@ -461,10 +510,36 @@ class FastReadingApp:
 
     def advance_rsvp_word(self) -> None:
         self.rsvp_after_id = None
+        if self.should_pause_after_current_rsvp_word():
+            self.start_rsvp_sentence_pause()
+            return
+        self.advance_rsvp_word_after_pause()
+
+    def advance_rsvp_word_after_pause(self) -> None:
+        self.rsvp_after_id = None
+        self.rsvp_is_sentence_pause = False
+        self.rsvp_is_paused.set(False)
+        self.hide_rsvp_progress_bar()
         self.rsvp_word_index = (self.rsvp_word_index + 1) % max(len(self.rsvp_words), 1)
         self.rsvp_progress.set(self.rsvp_word_index)
         self.draw_rsvp_view()
         self.start_rsvp_playback()
+
+    def should_pause_after_current_rsvp_word(self) -> bool:
+        if not self.rsvp_sentence_pause_flags:
+            return False
+        return self.rsvp_sentence_pause_flags[self.rsvp_word_index % len(self.rsvp_sentence_pause_flags)]
+
+    def start_rsvp_sentence_pause(self) -> None:
+        pause_mode = self.rsvp_sentence_pause_mode.get()
+        if pause_mode == RSVP_MANUAL_SENTENCE_PAUSE:
+            self.rsvp_is_sentence_pause = True
+            self.rsvp_is_paused.set(True)
+            self.show_rsvp_progress_bar()
+            return
+
+        pause_ms = RSVP_SENTENCE_PAUSE_DURATIONS_MS.get(pause_mode, 0)
+        self.rsvp_after_id = self.root.after(pause_ms, self.advance_rsvp_word_after_pause)
 
     def _register_drop_target(self) -> None:
         self.drop_frame.drop_target_register(DND_FILES)
@@ -626,11 +701,36 @@ class FastReadingApp:
 
     def refresh_rsvp_words_from_import(self) -> None:
         imported_text = self.text_box.get("1.0", "end-1c").strip()
-        self.rsvp_words = imported_text.split() or RSVP_TEXT.split()
+        self.rsvp_words, self.rsvp_sentence_pause_flags = self.build_rsvp_tokens(imported_text or RSVP_TEXT)
         self.rsvp_word_index = min(self.rsvp_word_index, max(len(self.rsvp_words) - 1, 0))
         self.rsvp_progress_bar.configure(to=max(len(self.rsvp_words) - 1, 0))
         self.rsvp_progress.set(self.rsvp_word_index)
         self.draw_rsvp_view()
+
+    def handle_text_modified(self, event: tk.Event) -> None:
+        if not self.text_box.edit_modified():
+            return
+        self.text_box.edit_modified(False)
+        self.refresh_rsvp_words_from_import()
+
+    @staticmethod
+    def build_rsvp_tokens(text: str) -> tuple[list[str], list[bool]]:
+        word_matches = list(re.finditer(r"\S+", text))
+        words = [match.group(0) for match in word_matches]
+        pause_flags: list[bool] = []
+
+        for match in word_matches:
+            word = match.group(0).rstrip("\"')]}›»”’")
+            should_pause = False
+            if word.endswith((".", "?", "!")):
+                following_text = text[match.end() :]
+                next_match = re.search(r"\S", following_text)
+                should_pause = bool(next_match and following_text[next_match.start()].isupper())
+            pause_flags.append(should_pause)
+
+        if not words:
+            return RSVP_TEXT.split(), [False] * len(RSVP_TEXT.split())
+        return words, pause_flags
 
     def insert_pdf_image(self, image_data: str | bytes) -> None:
         if not isinstance(image_data, bytes):
