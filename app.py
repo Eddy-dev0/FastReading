@@ -59,6 +59,7 @@ class FastReadingApp:
         self.is_rsvp_fullscreen = False
         self.rsvp_fullscreen_frame: tk.Frame | None = None
         self.rsvp_windowed_widgets: tuple[tk.Canvas, tk.Label, tk.Scale] | None = None
+        self.rsvp_fullscreen_visual_offset_y: float | None = None
 
         notebook = ttk.Notebook(self.root)
         self.notebook = notebook
@@ -217,6 +218,7 @@ class FastReadingApp:
         if self.is_rsvp_fullscreen:
             return "break"
 
+        self.rsvp_fullscreen_visual_offset_y = self.get_rsvp_windowed_visual_offset_y()
         self.rsvp_windowed_widgets = (self.rsvp_canvas, self.rsvp_wpm_label, self.rsvp_progress_bar)
         self.notebook.pack_forget()
         self.root.attributes("-fullscreen", True)
@@ -278,6 +280,7 @@ class FastReadingApp:
             self.rsvp_canvas, self.rsvp_wpm_label, self.rsvp_progress_bar = self.rsvp_windowed_widgets
             self.rsvp_windowed_widgets = None
 
+        self.rsvp_fullscreen_visual_offset_y = None
         self.root.attributes("-fullscreen", False)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
         if self.rsvp_is_paused.get():
@@ -295,7 +298,7 @@ class FastReadingApp:
         height = max(canvas.winfo_height(), 1)
         scale = max(1.0, min(width / 640, height / 360))
         guide_x = (width / 2) + RSVP_GUIDE_OFFSET_X_PX
-        guide_y = self.get_rsvp_visual_center_y(height)
+        guide_y = self.get_rsvp_visual_center_y(height) + self.get_rsvp_visual_offset_y()
         word_x = guide_x + RSVP_WORD_OFFSET_X_PX
         word_y = guide_y + RSVP_WORD_OFFSET_Y_PX
         guide_half_gap = RSVP_BASE_GUIDE_HALF_GAP_PX * scale
@@ -322,6 +325,17 @@ class FastReadingApp:
         pivot_bbox = canvas.bbox(pivot_item)
         after_x = pivot_bbox[2] if pivot_bbox else word_x
         canvas.create_text(after_x, word_y, text=after, fill="white", font=font, anchor="w")
+
+    def get_rsvp_visual_offset_y(self) -> float:
+        if self.is_rsvp_fullscreen and self.rsvp_fullscreen_visual_offset_y is not None:
+            return self.rsvp_fullscreen_visual_offset_y
+        return 0.0
+
+    def get_rsvp_windowed_visual_offset_y(self) -> float:
+        self.root.update_idletasks()
+        canvas_center_y = self.rsvp_canvas.winfo_rooty() + self.get_rsvp_visual_center_y(self.rsvp_canvas.winfo_height())
+        root_center_y = self.root.winfo_rooty() + (self.root.winfo_height() / 2)
+        return canvas_center_y - root_center_y
 
     @staticmethod
     def get_rsvp_visual_center_y(canvas_height: int) -> float:
