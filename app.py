@@ -57,6 +57,7 @@ class FastReadingApp:
         self.edit_button_text = tk.StringVar(value="EDIT")
         self.selected_highlight_color = tk.StringVar(value="Yellow")
         self.rsvp_sentence_pause_mode = tk.StringVar(value=RSVP_MANUAL_SENTENCE_PAUSE)
+        self.rsvp_wpm = tk.IntVar(value=DEFAULT_RSVP_WPM)
         self.rsvp_long_word_min_length = tk.IntVar(value=DEFAULT_LONG_WORD_MIN_LENGTH)
         self.rsvp_long_word_wpm_percent = tk.IntVar(value=DEFAULT_LONG_WORD_WPM_PERCENT)
         self.rsvp_long_word_wpm_label = tk.StringVar(value=self.format_long_word_wpm_label())
@@ -94,7 +95,6 @@ class FastReadingApp:
         self.rsvp_word_index = 0
         self.rsvp_after_id: str | None = None
         self.rsvp_is_paused = tk.BooleanVar(value=False)
-        self.rsvp_wpm = tk.IntVar(value=DEFAULT_RSVP_WPM)
         self.rsvp_progress = tk.IntVar(value=0)
         self.rsvp_wpm_picker: tk.Toplevel | None = None
         self.build_rsvp_tab(rsvp_tab)
