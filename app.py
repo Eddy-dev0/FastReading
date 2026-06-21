@@ -17,7 +17,7 @@ RSVP_TEXT = """Import text in the FastReading Import tab to read it here with RS
 RSVP_WPM_PRESETS = list(range(100, 1001, 50))
 DEFAULT_RSVP_WPM = 300
 RSVP_GUIDE_OFFSET_X_PX = 0
-RSVP_WORD_OFFSET_X_PX = -20
+RSVP_WORD_OFFSET_X_PX = 0
 RSVP_WORD_OFFSET_Y_PX = 0
 RSVP_BASE_FONT_SIZE = 58
 RSVP_BASE_GUIDE_HALF_GAP_PX = 30
@@ -29,6 +29,10 @@ RSVP_SENTENCE_PAUSE_DURATIONS_MS = {
     "10 seconds": 10_000,
 }
 RSVP_MANUAL_SENTENCE_PAUSE = "Until Space is pressed"
+DEFAULT_LONG_WORD_MIN_LENGTH = 8
+DEFAULT_LONG_WORD_WPM_PERCENT = 100
+MIN_LONG_WORD_WPM_PERCENT = 25
+MAX_LONG_WORD_WPM_PERCENT = 100
 
 
 @dataclass
@@ -53,6 +57,9 @@ class FastReadingApp:
         self.edit_button_text = tk.StringVar(value="EDIT")
         self.selected_highlight_color = tk.StringVar(value="Yellow")
         self.rsvp_sentence_pause_mode = tk.StringVar(value=RSVP_MANUAL_SENTENCE_PAUSE)
+        self.rsvp_long_word_min_length = tk.IntVar(value=DEFAULT_LONG_WORD_MIN_LENGTH)
+        self.rsvp_long_word_wpm_percent = tk.IntVar(value=DEFAULT_LONG_WORD_WPM_PERCENT)
+        self.rsvp_long_word_wpm_label = tk.StringVar(value=self.format_long_word_wpm_label())
         self.rsvp_sentence_pause_flags: list[bool] = []
         self.rsvp_is_sentence_pause = False
         self.highlight_tags = {
@@ -194,6 +201,51 @@ class FastReadingApp:
                 value=option,
                 variable=self.rsvp_sentence_pause_mode,
             ).grid(row=row, column=0, sticky="w", padx=12, pady=3)
+
+        long_word_frame = ttk.LabelFrame(parent, text="Duration long words")
+        long_word_frame.grid(row=1, column=0, sticky="ew", pady=(18, 0))
+        long_word_frame.columnconfigure(1, weight=1)
+
+        long_word_description = ttk.Label(
+            long_word_frame,
+            text=(
+                "Slow down words from the selected letter count. "
+                "100% keeps them at the normal RSVP wpm; lower percentages display them longer."
+            ),
+            wraplength=720,
+            justify="left",
+        )
+        long_word_description.grid(row=0, column=0, columnspan=3, sticky="ew", padx=12, pady=(12, 8))
+
+        ttk.Label(long_word_frame, text="From letters:").grid(row=1, column=0, sticky="w", padx=12, pady=6)
+        min_length_spinbox = ttk.Spinbox(
+            long_word_frame,
+            from_=1,
+            to=40,
+            textvariable=self.rsvp_long_word_min_length,
+            width=6,
+            command=self.handle_long_word_settings_changed,
+        )
+        min_length_spinbox.grid(row=1, column=1, sticky="w", padx=12, pady=6)
+        min_length_spinbox.bind("<FocusOut>", self.handle_long_word_settings_changed)
+        min_length_spinbox.bind("<Return>", self.handle_long_word_settings_changed)
+
+        ttk.Label(long_word_frame, text="Long-word speed:").grid(row=2, column=0, sticky="w", padx=12, pady=(6, 12))
+        speed_slider = ttk.Scale(
+            long_word_frame,
+            from_=MIN_LONG_WORD_WPM_PERCENT,
+            to=MAX_LONG_WORD_WPM_PERCENT,
+            variable=self.rsvp_long_word_wpm_percent,
+            command=self.handle_long_word_settings_changed,
+        )
+        speed_slider.grid(row=2, column=1, sticky="ew", padx=12, pady=(6, 12))
+        ttk.Label(long_word_frame, textvariable=self.rsvp_long_word_wpm_label, width=18).grid(
+            row=2,
+            column=2,
+            sticky="e",
+            padx=12,
+            pady=(6, 12),
+        )
 
     def build_rsvp_tab(self, parent: tk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -363,10 +415,16 @@ class FastReadingApp:
         after = word[pivot + 1 :]
 
         font = ("Times New Roman", round(RSVP_BASE_FONT_SIZE * scale))
-        canvas.create_text(word_x, word_y, text=before, fill="white", font=font, anchor="e")
-        pivot_item = canvas.create_text(word_x, word_y, text=pivot_char, fill="#ff3045", font=font, anchor="w")
+        pivot_probe = canvas.create_text(-10_000, -10_000, text=pivot_char, font=font, anchor="nw", fill="black")
+        pivot_bbox = canvas.bbox(pivot_probe)
+        canvas.delete(pivot_probe)
+        pivot_width = (pivot_bbox[2] - pivot_bbox[0]) if pivot_bbox else 0
+        pivot_left_x = word_x - (pivot_width / 2)
+
+        canvas.create_text(pivot_left_x, word_y, text=before, fill="white", font=font, anchor="e")
+        pivot_item = canvas.create_text(pivot_left_x, word_y, text=pivot_char, fill="#ff3045", font=font, anchor="w")
         pivot_bbox = canvas.bbox(pivot_item)
-        after_x = pivot_bbox[2] if pivot_bbox else word_x
+        after_x = pivot_bbox[2] if pivot_bbox else pivot_left_x
         canvas.create_text(after_x, word_y, text=after, fill="white", font=font, anchor="w")
 
     def get_rsvp_visual_offset(self) -> tuple[float, float]:
@@ -391,7 +449,7 @@ class FastReadingApp:
         letters = [index for index, character in enumerate(word) if character.isalpha()]
         if not letters:
             return 0
-        return letters[min(len(letters) // 3, len(letters) - 1)]
+        return letters[(len(letters) - 1) // 2]
 
     def start_rsvp_playback(self) -> None:
         if self.rsvp_after_id is None:
@@ -409,7 +467,51 @@ class FastReadingApp:
         return "break"
 
     def get_rsvp_interval_ms(self) -> int:
-        return int(60_000 / max(self.rsvp_wpm.get(), 1))
+        return int(60_000 / max(self.get_current_rsvp_wpm(), 1))
+
+    def get_current_rsvp_wpm(self) -> int:
+        base_wpm = self.rsvp_wpm.get()
+        if not self.rsvp_words:
+            return base_wpm
+
+        current_word = self.rsvp_words[self.rsvp_word_index % len(self.rsvp_words)]
+        if self.get_rsvp_letter_count(current_word) < self.rsvp_long_word_min_length.get():
+            return base_wpm
+
+        percent = max(
+            MIN_LONG_WORD_WPM_PERCENT,
+            min(MAX_LONG_WORD_WPM_PERCENT, self.rsvp_long_word_wpm_percent.get()),
+        )
+        return max(1, round(base_wpm * (percent / 100)))
+
+    @staticmethod
+    def get_rsvp_letter_count(word: str) -> int:
+        return sum(1 for character in word if character.isalpha())
+
+    def format_long_word_wpm_label(self) -> str:
+        percent = max(
+            MIN_LONG_WORD_WPM_PERCENT,
+            min(MAX_LONG_WORD_WPM_PERCENT, self.rsvp_long_word_wpm_percent.get()),
+        )
+        effective_wpm = max(1, round(self.rsvp_wpm.get() * (percent / 100)))
+        return f"{percent}% ({effective_wpm} wpm)"
+
+    def handle_long_word_settings_changed(self, event: tk.Event | str | None = None) -> None:
+        try:
+            min_length = int(self.rsvp_long_word_min_length.get())
+        except (tk.TclError, ValueError):
+            min_length = DEFAULT_LONG_WORD_MIN_LENGTH
+        self.rsvp_long_word_min_length.set(max(1, min(40, min_length)))
+        self.rsvp_long_word_wpm_percent.set(
+            max(
+                MIN_LONG_WORD_WPM_PERCENT,
+                min(MAX_LONG_WORD_WPM_PERCENT, round(self.rsvp_long_word_wpm_percent.get())),
+            )
+        )
+        self.rsvp_long_word_wpm_label.set(self.format_long_word_wpm_label())
+        if self.rsvp_after_id is not None:
+            self.stop_rsvp_playback()
+            self.start_rsvp_playback()
 
     def change_rsvp_wpm(self, amount: int) -> str:
         self.set_rsvp_wpm(self.rsvp_wpm.get() + amount)
@@ -421,6 +523,7 @@ class FastReadingApp:
         new_value = max(minimum, min(maximum, value))
         self.rsvp_wpm.set(new_value)
         self.rsvp_wpm_label.configure(text=f"{new_value} wpm")
+        self.rsvp_long_word_wpm_label.set(self.format_long_word_wpm_label())
         if self.rsvp_after_id is not None:
             self.stop_rsvp_playback()
             self.start_rsvp_playback()
