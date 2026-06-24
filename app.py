@@ -29,6 +29,13 @@ RSVP_SENTENCE_PAUSE_DURATIONS_MS = {
     "10 seconds": 10_000,
 }
 RSVP_MANUAL_SENTENCE_PAUSE = "Until Space is pressed"
+RSVP_IMAGE_PAUSE_DURATIONS_MS = {
+    "1 second": 1_000,
+    "5 seconds": 5_000,
+    "10 seconds": 10_000,
+}
+RSVP_MANUAL_IMAGE_PAUSE = "Until Space is pressed"
+RSVP_IMAGE_TOKEN = "[IMAGE]"
 DEFAULT_LONG_WORD_MIN_LENGTH = 8
 DEFAULT_LONG_WORD_WPM_PERCENT = 100
 MIN_LONG_WORD_WPM_PERCENT = 25
@@ -39,7 +46,7 @@ class DocumentPart:
     """A text or image fragment extracted from an imported document."""
 
     kind: str
-    content: str | bytes
+    content: str | bytes | ImageTk.PhotoImage
 
 
 class FastReadingApp:
@@ -56,12 +63,16 @@ class FastReadingApp:
         self.edit_button_text = tk.StringVar(value="EDIT")
         self.selected_highlight_color = tk.StringVar(value="Yellow")
         self.rsvp_sentence_pause_mode = tk.StringVar(value=RSVP_MANUAL_SENTENCE_PAUSE)
+        self.rsvp_image_pause_mode = tk.StringVar(value="5 seconds")
         self.rsvp_wpm = tk.IntVar(value=DEFAULT_RSVP_WPM)
         self.rsvp_long_word_min_length = tk.IntVar(value=DEFAULT_LONG_WORD_MIN_LENGTH)
         self.rsvp_long_word_wpm_percent = tk.IntVar(value=DEFAULT_LONG_WORD_WPM_PERCENT)
         self.rsvp_long_word_wpm_label = tk.StringVar(value=self.format_long_word_wpm_label())
         self.rsvp_sentence_pause_flags: list[bool] = []
+        self.rsvp_image_tokens: list[ImageTk.PhotoImage | None] = []
+        self.rsvp_source_parts: list[DocumentPart] = []
         self.rsvp_is_sentence_pause = False
+        self.rsvp_is_image_pause = False
         self.highlight_tags = {
             "Yellow": ("highlight_yellow", "#fff59d"),
             "Green": ("highlight_green", "#c8e6c9"),
@@ -91,6 +102,7 @@ class FastReadingApp:
         notebook.add(settings_tab, text="Settings")
 
         self.rsvp_words, self.rsvp_sentence_pause_flags = self.build_rsvp_tokens(RSVP_TEXT)
+        self.rsvp_image_tokens = [None] * len(self.rsvp_words)
         self.rsvp_word_index = 0
         self.rsvp_after_id: str | None = None
         self.rsvp_is_paused = tk.BooleanVar(value=False)
@@ -201,8 +213,32 @@ class FastReadingApp:
                 variable=self.rsvp_sentence_pause_mode,
             ).grid(row=row, column=0, sticky="w", padx=12, pady=3)
 
+        image_pause_frame = ttk.LabelFrame(parent, text="Image Pause")
+        image_pause_frame.grid(row=1, column=0, sticky="ew", pady=(18, 0))
+        image_pause_frame.columnconfigure(0, weight=1)
+
+        image_pause_description = ttk.Label(
+            image_pause_frame,
+            text=(
+                "Choose how long RSVP should pause when an imported PDF image is shown "
+                "at the reading pivot."
+            ),
+            wraplength=720,
+            justify="left",
+        )
+        image_pause_description.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 8))
+
+        image_options = [RSVP_MANUAL_IMAGE_PAUSE, *RSVP_IMAGE_PAUSE_DURATIONS_MS]
+        for row, option in enumerate(image_options, start=1):
+            ttk.Radiobutton(
+                image_pause_frame,
+                text=option,
+                value=option,
+                variable=self.rsvp_image_pause_mode,
+            ).grid(row=row, column=0, sticky="w", padx=12, pady=3)
+
         long_word_frame = ttk.LabelFrame(parent, text="Duration long words")
-        long_word_frame.grid(row=1, column=0, sticky="ew", pady=(18, 0))
+        long_word_frame.grid(row=2, column=0, sticky="ew", pady=(18, 0))
         long_word_frame.columnconfigure(1, weight=1)
 
         long_word_description = ttk.Label(
@@ -405,7 +441,13 @@ class FastReadingApp:
 
         if not self.rsvp_words:
             return
-        word = self.rsvp_words[self.rsvp_word_index % len(self.rsvp_words)]
+        current_index = self.rsvp_word_index % len(self.rsvp_words)
+        image = self.rsvp_image_tokens[current_index] if current_index < len(self.rsvp_image_tokens) else None
+        if image is not None:
+            canvas.create_image(guide_x, guide_y, image=image, anchor="center")
+            return
+
+        word = self.rsvp_words[current_index]
         pivot = self.get_rsvp_pivot_index(word)
         before = word[:pivot]
         pivot_char = word[pivot : pivot + 1]
@@ -464,6 +506,8 @@ class FastReadingApp:
         return "break"
 
     def get_rsvp_interval_ms(self) -> int:
+        if self.should_pause_for_current_rsvp_image():
+            return 1
         return int(60_000 / max(self.get_current_rsvp_wpm(), 1))
 
     def get_current_rsvp_wpm(self) -> int:
@@ -575,16 +619,18 @@ class FastReadingApp:
 
     def toggle_rsvp_playback(self) -> None:
         if self.rsvp_after_id is None:
-            if self.rsvp_is_sentence_pause:
+            if self.rsvp_is_sentence_pause or self.rsvp_is_image_pause:
                 self.advance_rsvp_word_after_pause()
                 return
             self.rsvp_is_sentence_pause = False
+            self.rsvp_is_image_pause = False
             self.rsvp_is_paused.set(False)
             self.hide_rsvp_progress_bar()
             self.start_rsvp_playback()
         else:
             self.stop_rsvp_playback()
             self.rsvp_is_sentence_pause = False
+            self.rsvp_is_image_pause = False
             self.rsvp_is_paused.set(True)
             self.show_rsvp_progress_bar()
 
@@ -610,6 +656,9 @@ class FastReadingApp:
 
     def advance_rsvp_word(self) -> None:
         self.rsvp_after_id = None
+        if self.should_pause_for_current_rsvp_image():
+            self.start_rsvp_image_pause()
+            return
         if self.should_pause_after_current_rsvp_word():
             self.start_rsvp_sentence_pause()
             return
@@ -618,6 +667,7 @@ class FastReadingApp:
     def advance_rsvp_word_after_pause(self) -> None:
         self.rsvp_after_id = None
         self.rsvp_is_sentence_pause = False
+        self.rsvp_is_image_pause = False
         self.rsvp_is_paused.set(False)
         self.hide_rsvp_progress_bar()
         self.rsvp_word_index = (self.rsvp_word_index + 1) % max(len(self.rsvp_words), 1)
@@ -625,10 +675,26 @@ class FastReadingApp:
         self.draw_rsvp_view()
         self.start_rsvp_playback()
 
+    def should_pause_for_current_rsvp_image(self) -> bool:
+        if not self.rsvp_image_tokens:
+            return False
+        return self.rsvp_image_tokens[self.rsvp_word_index % len(self.rsvp_image_tokens)] is not None
+
     def should_pause_after_current_rsvp_word(self) -> bool:
         if not self.rsvp_sentence_pause_flags:
             return False
         return self.rsvp_sentence_pause_flags[self.rsvp_word_index % len(self.rsvp_sentence_pause_flags)]
+
+    def start_rsvp_image_pause(self) -> None:
+        pause_mode = self.rsvp_image_pause_mode.get()
+        if pause_mode == RSVP_MANUAL_IMAGE_PAUSE:
+            self.rsvp_is_image_pause = True
+            self.rsvp_is_paused.set(True)
+            self.show_rsvp_progress_bar()
+            return
+
+        pause_ms = RSVP_IMAGE_PAUSE_DURATIONS_MS.get(pause_mode, 5_000)
+        self.rsvp_after_id = self.root.after(pause_ms, self.advance_rsvp_word_after_pause)
 
     def start_rsvp_sentence_pause(self) -> None:
         pause_mode = self.rsvp_sentence_pause_mode.get()
@@ -680,7 +746,7 @@ class FastReadingApp:
             imported_count += 1
 
         if imported_count:
-            self.refresh_rsvp_words_from_import()
+            self.refresh_rsvp_words_from_import(use_source_parts=True)
             self.status.set(f"Successfully inserted {imported_count} file(s).")
         if errors:
             messagebox.showwarning("Import notes", "\n".join(errors))
@@ -789,19 +855,32 @@ class FastReadingApp:
         was_editing = self.is_editing.get()
         self.text_box.configure(state="normal")
         separator = "\n\n" if self.text_box.get("1.0", "end-1c") else ""
-        self.text_box.insert("end", f"{separator}===== {path.name} =====\n")
+        header = f"{separator}===== {path.name} =====\n"
+        self.text_box.insert("end", header)
+        self.rsvp_source_parts.append(DocumentPart("text", header))
         for part in content:
             if part.kind == "text":
-                self.text_box.insert("end", f"{part.content}\n\n")
+                text_content = f"{part.content}\n\n"
+                self.text_box.insert("end", text_content)
+                self.rsvp_source_parts.append(DocumentPart("text", text_content))
             elif part.kind == "image":
-                self.insert_pdf_image(part.content)
+                photo = self.insert_pdf_image(part.content)
+                if photo is not None:
+                    self.rsvp_source_parts.append(DocumentPart("image", photo))
         self.text_box.see("end")
+        self.text_box.edit_modified(False)
         if not was_editing:
             self.text_box.configure(state="disabled")
 
-    def refresh_rsvp_words_from_import(self) -> None:
-        imported_text = self.text_box.get("1.0", "end-1c").strip()
-        self.rsvp_words, self.rsvp_sentence_pause_flags = self.build_rsvp_tokens(imported_text or RSVP_TEXT)
+    def refresh_rsvp_words_from_import(self, use_source_parts: bool = False) -> None:
+        if use_source_parts and self.rsvp_source_parts:
+            self.rsvp_words, self.rsvp_sentence_pause_flags, self.rsvp_image_tokens = self.build_rsvp_tokens_from_parts(
+                self.rsvp_source_parts
+            )
+        else:
+            imported_text = self.text_box.get("1.0", "end-1c").strip()
+            self.rsvp_words, self.rsvp_sentence_pause_flags = self.build_rsvp_tokens(imported_text or RSVP_TEXT)
+            self.rsvp_image_tokens = [None] * len(self.rsvp_words)
         self.rsvp_word_index = min(self.rsvp_word_index, max(len(self.rsvp_words) - 1, 0))
         self.rsvp_progress_bar.configure(to=max(len(self.rsvp_words) - 1, 0))
         self.rsvp_progress.set(self.rsvp_word_index)
@@ -812,6 +891,30 @@ class FastReadingApp:
             return
         self.text_box.edit_modified(False)
         self.refresh_rsvp_words_from_import()
+
+    def build_rsvp_tokens_from_parts(
+        self,
+        parts: list[DocumentPart],
+    ) -> tuple[list[str], list[bool], list[ImageTk.PhotoImage | None]]:
+        words: list[str] = []
+        pause_flags: list[bool] = []
+        image_tokens: list[ImageTk.PhotoImage | None] = []
+
+        for part in parts:
+            if part.kind == "text" and isinstance(part.content, str):
+                part_words, part_pause_flags = self.build_rsvp_tokens(part.content)
+                words.extend(part_words)
+                pause_flags.extend(part_pause_flags)
+                image_tokens.extend([None] * len(part_words))
+            elif part.kind == "image" and isinstance(part.content, ImageTk.PhotoImage):
+                words.append(RSVP_IMAGE_TOKEN)
+                pause_flags.append(False)
+                image_tokens.append(part.content)
+
+        if not words:
+            fallback_words, fallback_pause_flags = self.build_rsvp_tokens(RSVP_TEXT)
+            return fallback_words, fallback_pause_flags, [None] * len(fallback_words)
+        return words, pause_flags, image_tokens
 
     @staticmethod
     def build_rsvp_tokens(text: str) -> tuple[list[str], list[bool]]:
@@ -832,9 +935,9 @@ class FastReadingApp:
             return RSVP_TEXT.split(), [False] * len(RSVP_TEXT.split())
         return words, pause_flags
 
-    def insert_pdf_image(self, image_data: str | bytes) -> None:
+    def insert_pdf_image(self, image_data: str | bytes) -> ImageTk.PhotoImage | None:
         if not isinstance(image_data, bytes):
-            return
+            return None
         try:
             image = Image.open(BytesIO(image_data))
             if image.mode not in {"RGB", "RGBA"}:
@@ -845,11 +948,12 @@ class FastReadingApp:
             photo = ImageTk.PhotoImage(image)
         except Exception:
             self.text_box.insert("end", "[PDF image could not be displayed]\n\n")
-            return
+            return None
 
         self.pdf_images.append(photo)
         self.text_box.image_create("end", image=photo)
         self.text_box.insert("end", "\n\n")
+        return photo
 
 
 def main() -> None:

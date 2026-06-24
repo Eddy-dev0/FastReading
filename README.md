@@ -30,5 +30,6 @@ python app.py
 8. The **RSVP** tab reads the current text from **FastReading Import** one word at a time on a black background with dark guide lines, a centered red pivot letter, and a 300 wpm indicator. The pivot is the middle letter; for words with an even number of letters, the pivot is rounded down to the left middle letter. Click the wpm indicator to open a clean upward wpm picker. Use arrow keys to adjust the speed by 25 wpm. Press Space to pause and reveal the green seek bar for scrubbing through the current text.
 9. Imported PDF images are displayed inline in the inserted-text box when they can be extracted from the PDF.
 10. Open **Settings** to choose sentence-ending pauses for RSVP: wait until Space is pressed, or pause automatically for 1, 2, 5, or 10 seconds. Sentence endings are detected after `.`, `?`, or `!` when the next non-space character is uppercase.
-11. In **Settings**, use **Duration long words** to choose the minimum word length and the percentage speed for those long words. At 100%, long words use the normal wpm. Below 100%, long words are displayed longer; for example, 50% at 300 wpm displays matching long words at 150 wpm.
-12. Click **DONE** to return to protected view mode.
+11. In **Settings**, use **Image Pause** to choose how long RSVP shows imported PDF images at the pivot: pause for 1, 5, or 10 seconds, or wait until Space is pressed.
+12. In **Settings**, use **Duration long words** to choose the minimum word length and the percentage speed for those long words. At 100%, long words use the normal wpm. Below 100%, long words are displayed longer; for example, 50% at 300 wpm displays matching long words at 150 wpm.
+13. Click **DONE** to return to protected view mode.
