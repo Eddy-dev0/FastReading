@@ -33,26 +33,6 @@ DEFAULT_LONG_WORD_MIN_LENGTH = 8
 DEFAULT_LONG_WORD_WPM_PERCENT = 100
 MIN_LONG_WORD_WPM_PERCENT = 25
 MAX_LONG_WORD_WPM_PERCENT = 100
-MIN_QUIZ_SENTENCE_WORDS = 6
-QUIZ_STOP_WORDS = {
-    "aber", "alle", "allem", "allen", "aller", "alles", "als", "also", "am", "an", "auch", "auf",
-    "aus", "bei", "bin", "bis", "bist", "da", "damit", "dann", "das", "dass", "dein",
-    "dem", "den", "der", "des", "die", "dies", "diese", "diesem", "diesen", "dieser", "doch",
-    "du", "durch", "ein", "eine", "einem", "einen", "einer", "eines", "er", "es", "für",
-    "ganz", "hat", "habe", "haben", "hier", "ich", "im", "in", "ist", "ja", "kann", "man",
-    "mit", "nach", "nicht", "noch", "oder", "sich", "sie", "so", "soll", "um", "und", "vom",
-    "von", "war", "was", "wenn", "wer", "wie", "wir", "wird", "zu", "zum", "zur",
-    "the", "and", "for", "from", "that", "this", "with", "you", "are", "was", "were", "will",
-}
-
-
-@dataclass
-class QuizQuestion:
-    """A generated question for a text segment."""
-
-    question: str
-    answer: str
-
 
 @dataclass
 class DocumentPart:
@@ -81,11 +61,6 @@ class FastReadingApp:
         self.rsvp_long_word_wpm_percent = tk.IntVar(value=DEFAULT_LONG_WORD_WPM_PERCENT)
         self.rsvp_long_word_wpm_label = tk.StringVar(value=self.format_long_word_wpm_label())
         self.rsvp_sentence_pause_flags: list[bool] = []
-        self.quiz_last_generated_word_index = 0
-        self.quiz_questions: list[QuizQuestion] = []
-        self.quiz_question_index = 0
-        self.quiz_button: tk.Button | None = None
-        self.quiz_window: tk.Toplevel | None = None
         self.rsvp_is_sentence_pause = False
         self.highlight_tags = {
             "Yellow": ("highlight_yellow", "#fff59d"),
@@ -323,174 +298,7 @@ class FastReadingApp:
         )
         self.rsvp_progress_bar.grid(row=2, column=0, sticky="ew", padx=38, pady=(0, 22))
         self.rsvp_progress_bar.grid_remove()
-        self.create_quiz_button(parent)
-
         self.start_rsvp_playback()
-
-
-    def create_quiz_button(self, parent: tk.Widget) -> None:
-        self.quiz_button = tk.Button(
-            parent,
-            text="?",
-            command=self.open_quiz_start_window,
-            font=("Arial", 22, "bold"),
-            fg="#88E788",
-            bg="black",
-            activeforeground="white",
-            activebackground="#151515",
-            bd=0,
-            highlightthickness=1,
-            highlightbackground="#264d26",
-            relief="flat",
-            width=2,
-            cursor="hand2",
-        )
-        self.hide_quiz_button()
-
-    def show_quiz_button(self) -> None:
-        if self.quiz_button is not None:
-            self.quiz_button.place(x=24, y=18)
-
-    def hide_quiz_button(self) -> None:
-        if self.quiz_button is not None:
-            self.quiz_button.place_forget()
-
-    def open_quiz_start_window(self) -> None:
-        if self.quiz_window is not None and self.quiz_window.winfo_exists():
-            self.quiz_window.lift()
-            return
-
-        window = tk.Toplevel(self.root)
-        self.quiz_window = window
-        window.title("Abfragen")
-        window.geometry("460x300")
-        window.configure(bg="#101010")
-        window.transient(self.root)
-        window.columnconfigure(0, weight=1)
-
-        tk.Label(
-            window,
-            text="Aus welchem Textabschnitt sollen Fragen entstehen?",
-            bg="#101010",
-            fg="white",
-            font=("Arial", 14, "bold"),
-            wraplength=400,
-            justify="left",
-        ).grid(row=0, column=0, sticky="ew", padx=22, pady=(22, 14))
-
-        tk.Button(
-            window,
-            text="Vom Anfang bis zum aktuellen Stand",
-            command=lambda: self.start_quiz_for_range(0, self.rsvp_word_index),
-        ).grid(row=1, column=0, sticky="ew", padx=22, pady=5)
-
-        tk.Button(
-            window,
-            text="Seit der letzten Fragengenerierung",
-            command=lambda: self.start_quiz_for_range(self.quiz_last_generated_word_index, self.rsvp_word_index),
-        ).grid(row=2, column=0, sticky="ew", padx=22, pady=5)
-
-        tk.Button(
-            window,
-            text="Startpunkt mit Slider wählen",
-            command=self.open_quiz_slider_window,
-        ).grid(row=3, column=0, sticky="ew", padx=22, pady=5)
-
-        tk.Label(
-            window,
-            text=(
-                "Die Fragen werden lokal heuristisch aus Kernaussagen erzeugt: "
-                "Sätze werden zusammengefasst, wichtige Begriffe erkannt und in Verständnisfragen umformuliert."
-            ),
-            bg="#101010",
-            fg="#bdbdbd",
-            wraplength=400,
-            justify="left",
-        ).grid(row=4, column=0, sticky="ew", padx=22, pady=(16, 0))
-
-    def open_quiz_slider_window(self) -> None:
-        if self.quiz_window is not None and self.quiz_window.winfo_exists():
-            self.quiz_window.destroy()
-        window = tk.Toplevel(self.root)
-        self.quiz_window = window
-        window.title("Startpunkt wählen")
-        window.geometry("520x180")
-        window.configure(bg="#101010")
-        window.columnconfigure(0, weight=1)
-
-        start_index = tk.IntVar(value=0)
-        tk.Label(window, text="Wähle, ab welchem Lesestand abgefragt werden soll:", bg="#101010", fg="white").grid(
-            row=0, column=0, sticky="ew", padx=22, pady=(22, 8)
-        )
-        slider = tk.Scale(
-            window,
-            from_=0,
-            to=max(self.rsvp_word_index, 0),
-            orient="horizontal",
-            variable=start_index,
-            showvalue=True,
-            bg="#101010",
-            fg="#88E788",
-            troughcolor="#202020",
-            highlightthickness=0,
-        )
-        slider.grid(row=1, column=0, sticky="ew", padx=22, pady=8)
-        tk.Button(window, text="OK", command=lambda: self.start_quiz_for_range(start_index.get(), self.rsvp_word_index)).grid(
-            row=2, column=0, sticky="e", padx=22, pady=10
-        )
-
-    def start_quiz_for_range(self, start_word_index: int, end_word_index: int) -> None:
-        start_word_index, end_word_index = sorted((max(start_word_index, 0), max(end_word_index, 0)))
-        questions = self.generate_quiz_questions(start_word_index, end_word_index)
-        if not questions:
-            messagebox.showinfo("Abfragen", "Für diesen Abschnitt ist noch zu wenig aussagekräftiger Text vorhanden.")
-            return
-        self.quiz_questions = questions
-        self.quiz_question_index = 0
-        self.quiz_last_generated_word_index = end_word_index
-        self.show_quiz_question_window()
-
-    def show_quiz_question_window(self) -> None:
-        if self.quiz_window is not None and self.quiz_window.winfo_exists():
-            self.quiz_window.destroy()
-        window = tk.Toplevel(self.root)
-        self.quiz_window = window
-        window.title("Abfragen")
-        window.geometry("560x360")
-        window.configure(bg="#101010")
-        window.columnconfigure(0, weight=1)
-        question = self.quiz_questions[self.quiz_question_index]
-        answer_var = tk.StringVar()
-
-        tk.Label(
-            window,
-            text=f"Frage {self.quiz_question_index + 1} von {len(self.quiz_questions)}",
-            bg="#101010",
-            fg="#88E788",
-            font=("Arial", 12, "bold"),
-        ).grid(row=0, column=0, sticky="w", padx=22, pady=(20, 8))
-        tk.Label(window, text=question.question, bg="#101010", fg="white", font=("Arial", 15), wraplength=500, justify="left").grid(
-            row=1, column=0, sticky="ew", padx=22, pady=8
-        )
-        ttk.Entry(window, textvariable=answer_var).grid(row=2, column=0, sticky="ew", padx=22, pady=8)
-        answer_label = tk.Label(window, text="", bg="#101010", fg="#d7ffd7", wraplength=500, justify="left")
-        answer_label.grid(row=3, column=0, sticky="ew", padx=22, pady=8)
-
-        def reveal_answer() -> None:
-            answer_label.configure(text=f"Musterantwort: {question.answer}")
-
-        def next_question() -> None:
-            if self.quiz_question_index < len(self.quiz_questions) - 1:
-                self.quiz_question_index += 1
-                self.show_quiz_question_window()
-            else:
-                messagebox.showinfo("Abfragen", "Du hast alle Fragen dieses Abschnitts beantwortet.")
-                window.destroy()
-
-        button_row = tk.Frame(window, bg="#101010")
-        button_row.grid(row=4, column=0, sticky="e", padx=22, pady=18)
-        tk.Button(button_row, text="Antwort anzeigen", command=reveal_answer).pack(side="left", padx=6)
-        tk.Button(button_row, text="Nächste Frage", command=next_question).pack(side="left", padx=6)
 
     def toggle_rsvp_fullscreen(self, event: tk.Event | None = None) -> str:
         if self.is_rsvp_fullscreen:
@@ -545,10 +353,8 @@ class FastReadingApp:
             width=24,
             relief="flat",
         )
-        self.create_quiz_button(fullscreen_frame)
         if self.rsvp_is_paused.get():
             self.rsvp_progress_bar.place(relx=0.5, rely=1, anchor="s", relwidth=1, width=-76, y=-22)
-            self.show_quiz_button()
 
         self.is_rsvp_fullscreen = True
         self.draw_rsvp_view()
@@ -570,10 +376,8 @@ class FastReadingApp:
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
         if self.rsvp_is_paused.get():
             self.rsvp_progress_bar.grid()
-            self.show_quiz_button()
         else:
             self.rsvp_progress_bar.grid_remove()
-            self.hide_quiz_button()
         self.is_rsvp_fullscreen = False
         self.draw_rsvp_view()
         return "break"
@@ -791,71 +595,18 @@ class FastReadingApp:
             self.rsvp_progress_bar.place(relx=0.5, rely=1, anchor="s", relwidth=1, width=-76, y=-22)
         else:
             self.rsvp_progress_bar.grid()
-        self.show_quiz_button()
 
     def hide_rsvp_progress_bar(self) -> None:
         if self.is_rsvp_fullscreen:
             self.rsvp_progress_bar.place_forget()
         else:
             self.rsvp_progress_bar.grid_remove()
-        self.hide_quiz_button()
 
     def seek_rsvp_word(self, value: str) -> None:
         if not self.rsvp_is_paused.get():
             return
         self.rsvp_word_index = int(float(value))
         self.draw_rsvp_view()
-
-    def generate_quiz_questions(self, start_word_index: int, end_word_index: int) -> list[QuizQuestion]:
-        segment_words = self.rsvp_words[start_word_index : end_word_index + 1]
-        segment_text = " ".join(segment_words)
-        sentences = self.extract_quiz_sentences(segment_text)
-        questions: list[QuizQuestion] = []
-
-        for sentence in sentences[:6]:
-            keywords = self.extract_quiz_keywords(sentence)
-            if not keywords:
-                continue
-            focus = ", ".join(keywords[:2])
-            if len(keywords) >= 2:
-                question = f"Welche Rolle spielen {focus} in diesem Abschnitt?"
-            else:
-                question = f"Was wird über {focus} ausgesagt?"
-            questions.append(QuizQuestion(question=question, answer=self.summarize_quiz_answer(sentence)))
-
-        if len(questions) < 3 and len(sentences) >= 2:
-            combined = " ".join(sentences[:2])
-            questions.append(
-                QuizQuestion(
-                    question="Wie lässt sich die zentrale Aussage dieses Abschnitts in eigenen Worten erklären?",
-                    answer=self.summarize_quiz_answer(combined),
-                )
-            )
-        return questions[:6]
-
-    @staticmethod
-    def extract_quiz_sentences(text: str) -> list[str]:
-        cleaned_text = re.sub(r"\s+", " ", text).strip()
-        candidates = re.split(r"(?<=[.!?])\s+", cleaned_text)
-        return [sentence.strip() for sentence in candidates if len(sentence.split()) >= MIN_QUIZ_SENTENCE_WORDS]
-
-    @staticmethod
-    def extract_quiz_keywords(sentence: str) -> list[str]:
-        words = re.findall(r"[\wÄÖÜäöüß-]+", sentence.lower())
-        scored: dict[str, int] = {}
-        for word in words:
-            normalized = word.strip("-")
-            if len(normalized) < 4 or normalized in QUIZ_STOP_WORDS:
-                continue
-            scored[normalized] = scored.get(normalized, 0) + len(normalized)
-        return [word for word, _ in sorted(scored.items(), key=lambda item: item[1], reverse=True)[:3]]
-
-    @staticmethod
-    def summarize_quiz_answer(sentence: str) -> str:
-        words = sentence.split()
-        if len(words) <= 26:
-            return sentence
-        return f"{' '.join(words[:26])} ..."
 
     def advance_rsvp_word(self) -> None:
         self.rsvp_after_id = None
