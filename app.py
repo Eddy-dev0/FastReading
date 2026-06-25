@@ -1,6 +1,7 @@
 """Tkinter application for importing text and PDF files into a reading buffer."""
 
 from dataclasses import dataclass
+import random
 from io import BytesIO
 from pathlib import Path
 import re
@@ -42,6 +43,16 @@ MIN_LONG_WORD_WPM_PERCENT = 25
 MAX_LONG_WORD_WPM_PERCENT = 100
 
 @dataclass
+class Question:
+    """Multiple-choice question embedded in the imported text."""
+
+    prompt: str
+    answers: list[str]
+    correct_index: int
+    reveal_word_index: int
+
+
+@dataclass
 class DocumentPart:
     """A text or image fragment extracted from an imported document."""
 
@@ -68,6 +79,10 @@ class FastReadingApp:
         self.rsvp_long_word_min_length = tk.IntVar(value=DEFAULT_LONG_WORD_MIN_LENGTH)
         self.rsvp_long_word_wpm_percent = tk.IntVar(value=DEFAULT_LONG_WORD_WPM_PERCENT)
         self.rsvp_long_word_wpm_label = tk.StringVar(value=self.format_long_word_wpm_label())
+        self.question_mode = tk.StringVar(value="Chronological")
+        self.questions: list[Question] = []
+        self.current_question: Question | None = None
+        self.current_question_choices: list[tk.IntVar] = []
         self.rsvp_sentence_pause_flags: list[bool] = []
         self.rsvp_image_tokens: list[ImageTk.PhotoImage | None] = []
         self.rsvp_source_parts: list[DocumentPart] = []
@@ -96,9 +111,11 @@ class FastReadingApp:
 
         main_frame = ttk.Frame(notebook, padding=0)
         rsvp_tab = tk.Frame(notebook, bg="black")
+        questions_tab = ttk.Frame(notebook, padding=16)
         settings_tab = ttk.Frame(notebook, padding=24)
         notebook.add(main_frame, text="FastReading Import")
         notebook.add(rsvp_tab, text="RSVP")
+        notebook.add(questions_tab, text="Questions")
         notebook.add(settings_tab, text="Settings")
 
         self.rsvp_words, self.rsvp_sentence_pause_flags = self.build_rsvp_tokens(RSVP_TEXT)
@@ -109,6 +126,7 @@ class FastReadingApp:
         self.rsvp_progress = tk.IntVar(value=0)
         self.rsvp_wpm_picker: tk.Toplevel | None = None
         self.build_rsvp_tab(rsvp_tab)
+        self.build_questions_tab(questions_tab)
         self.build_settings_tab(settings_tab)
 
         main_frame.columnconfigure(0, weight=1)
@@ -185,6 +203,105 @@ class FastReadingApp:
 
         status_label = ttk.Label(main_frame, textvariable=self.status, anchor="w")
         status_label.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+
+
+    def build_questions_tab(self, parent: ttk.Frame) -> None:
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
+
+        toolbar = ttk.Frame(parent)
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        toolbar.columnconfigure(0, weight=1)
+
+        ttk.Label(toolbar, text="Question order:").grid(row=0, column=1, sticky="e", padx=(0, 8))
+        ttk.Radiobutton(
+            toolbar,
+            text="Chronological",
+            value="Chronological",
+            variable=self.question_mode,
+            command=self.refresh_question_view,
+        ).grid(row=0, column=2, sticky="e", padx=(0, 8))
+        ttk.Radiobutton(
+            toolbar,
+            text="Random",
+            value="Random",
+            variable=self.question_mode,
+            command=self.refresh_question_view,
+        ).grid(row=0, column=3, sticky="e")
+
+        question_frame = ttk.LabelFrame(parent, text="Questions")
+        question_frame.grid(row=1, column=0, sticky="nsew")
+        question_frame.columnconfigure(0, weight=1)
+        question_frame.rowconfigure(1, weight=1)
+
+        self.question_status = tk.StringVar(value="No questions found in the inserted text.")
+        ttk.Label(question_frame, textvariable=self.question_status, wraplength=760, justify="left").grid(
+            row=0, column=0, sticky="ew", padx=12, pady=(12, 8)
+        )
+
+        self.question_prompt = tk.StringVar(value="")
+        ttk.Label(question_frame, textvariable=self.question_prompt, wraplength=760, justify="left", font=("Arial", 14, "bold")).grid(
+            row=1, column=0, sticky="new", padx=12, pady=(0, 8)
+        )
+
+        self.answers_frame = ttk.Frame(question_frame)
+        self.answers_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 8))
+        self.answers_frame.columnconfigure(0, weight=1)
+
+        button_row = ttk.Frame(question_frame)
+        button_row.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 12))
+        button_row.columnconfigure(0, weight=1)
+        self.question_feedback = tk.StringVar(value="")
+        ttk.Label(button_row, textvariable=self.question_feedback, wraplength=620, justify="left").grid(row=0, column=0, sticky="w")
+        ttk.Button(button_row, text="Weiter", command=self.check_current_question_answer).grid(row=0, column=1, sticky="e")
+
+    def refresh_question_view(self) -> None:
+        available_questions = self.get_available_questions()
+        if not available_questions:
+            self.current_question = None
+            self.question_prompt.set("")
+            self.question_feedback.set("")
+            self.question_status.set("No questions are available yet." if self.questions else "No questions found in the inserted text.")
+            self.clear_answer_widgets()
+            return
+
+        if self.question_mode.get() == "Random":
+            self.current_question = random.choice(available_questions)
+        else:
+            self.current_question = available_questions[0]
+        self.question_status.set(f"{len(available_questions)} of {len(self.questions)} question(s) available.")
+        self.question_prompt.set(self.current_question.prompt)
+        self.question_feedback.set("")
+        self.render_answer_widgets(self.current_question)
+
+    def get_available_questions(self) -> list[Question]:
+        if self.question_mode.get() == "Random":
+            return self.questions
+        return [question for question in self.questions if question.reveal_word_index <= self.rsvp_word_index]
+
+    def clear_answer_widgets(self) -> None:
+        for child in self.answers_frame.winfo_children():
+            child.destroy()
+        self.current_question_choices = []
+
+    def render_answer_widgets(self, question: Question) -> None:
+        self.clear_answer_widgets()
+        for row, answer in enumerate(question.answers):
+            choice = tk.IntVar(value=0)
+            self.current_question_choices.append(choice)
+            ttk.Checkbutton(self.answers_frame, text=f"{row + 1}: {answer}", variable=choice).grid(
+                row=row, column=0, sticky="w", pady=3
+            )
+
+    def check_current_question_answer(self) -> None:
+        if self.current_question is None:
+            return
+        selected = [index for index, choice in enumerate(self.current_question_choices, start=1) if choice.get()]
+        correct_answer = self.current_question.answers[self.current_question.correct_index - 1]
+        if selected == [self.current_question.correct_index]:
+            self.question_feedback.set(f"Correct. The correct answer is: {correct_answer}")
+        else:
+            self.question_feedback.set(f"The correct answer is: {correct_answer}")
 
     def build_settings_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -673,6 +790,7 @@ class FastReadingApp:
         self.rsvp_word_index = (self.rsvp_word_index + 1) % max(len(self.rsvp_words), 1)
         self.rsvp_progress.set(self.rsvp_word_index)
         self.draw_rsvp_view()
+        self.refresh_question_view()
         self.start_rsvp_playback()
 
     def should_pause_for_current_rsvp_image(self) -> bool:
@@ -874,17 +992,20 @@ class FastReadingApp:
 
     def refresh_rsvp_words_from_import(self, use_source_parts: bool = False) -> None:
         if use_source_parts and self.rsvp_source_parts:
+            self.questions = self.extract_questions_from_parts(self.rsvp_source_parts)
             self.rsvp_words, self.rsvp_sentence_pause_flags, self.rsvp_image_tokens = self.build_rsvp_tokens_from_parts(
                 self.rsvp_source_parts
             )
         else:
             imported_text = self.text_box.get("1.0", "end-1c").strip()
+            self.questions = self.extract_questions(imported_text)
             self.rsvp_words, self.rsvp_sentence_pause_flags = self.build_rsvp_tokens(imported_text or RSVP_TEXT)
             self.rsvp_image_tokens = [None] * len(self.rsvp_words)
         self.rsvp_word_index = min(self.rsvp_word_index, max(len(self.rsvp_words) - 1, 0))
         self.rsvp_progress_bar.configure(to=max(len(self.rsvp_words) - 1, 0))
         self.rsvp_progress.set(self.rsvp_word_index)
         self.draw_rsvp_view()
+        self.refresh_question_view()
 
     def handle_text_modified(self, event: tk.Event) -> None:
         if not self.text_box.edit_modified():
@@ -917,7 +1038,12 @@ class FastReadingApp:
         return words, pause_flags, image_tokens
 
     @staticmethod
-    def build_rsvp_tokens(text: str) -> tuple[list[str], list[bool]]:
+    def strip_question_blocks(text: str) -> str:
+        return re.sub(r"\?\(\[.*?\]\s*\d+\s*\)\?", " ", text, flags=re.DOTALL)
+
+    @classmethod
+    def build_rsvp_tokens(cls, text: str) -> tuple[list[str], list[bool]]:
+        text = cls.strip_question_blocks(text)
         word_matches = list(re.finditer(r"\S+", text))
         words = [match.group(0) for match in word_matches]
         pause_flags: list[bool] = []
@@ -934,6 +1060,32 @@ class FastReadingApp:
         if not words:
             return RSVP_TEXT.split(), [False] * len(RSVP_TEXT.split())
         return words, pause_flags
+
+
+    @classmethod
+    def extract_questions_from_parts(cls, parts: list[DocumentPart]) -> list[Question]:
+        text = "\n".join(part.content for part in parts if part.kind == "text" and isinstance(part.content, str))
+        return cls.extract_questions(text)
+
+    @classmethod
+    def extract_questions(cls, text: str) -> list[Question]:
+        questions: list[Question] = []
+        question_pattern = re.compile(r"\?\(\[(.*?)\]\s*(\d+)\s*\)\?", re.DOTALL)
+        for match in question_pattern.finditer(text):
+            body = " ".join(match.group(1).split())
+            correct_index = int(match.group(2))
+            prompt_match = re.match(r"\((.*?)\)\s*(.*)", body)
+            if not prompt_match:
+                continue
+            prompt = prompt_match.group(1).strip()
+            answer_body = prompt_match.group(2).strip()
+            answer_matches = list(re.finditer(r"(\d+)\s*:\s*(.*?)(?=,\s*\d+\s*:|$)", answer_body))
+            answers = [answer_match.group(2).strip().rstrip("?").strip() for answer_match in answer_matches]
+            if not prompt or not answers or correct_index < 1 or correct_index > len(answers):
+                continue
+            reveal_word_index = len(re.findall(r"\S+", cls.strip_question_blocks(text[: match.end()])))
+            questions.append(Question(prompt, answers, correct_index, reveal_word_index))
+        return questions
 
     def insert_pdf_image(self, image_data: str | bytes) -> ImageTk.PhotoImage | None:
         if not isinstance(image_data, bytes):
