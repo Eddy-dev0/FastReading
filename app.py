@@ -122,12 +122,13 @@ class FastReadingApp:
         self.rsvp_image_tokens = [None] * len(self.rsvp_words)
         self.rsvp_word_index = 0
         self.rsvp_after_id: str | None = None
-        self.rsvp_is_paused = tk.BooleanVar(value=False)
+        self.rsvp_is_paused = tk.BooleanVar(value=True)
         self.rsvp_progress = tk.IntVar(value=0)
         self.rsvp_wpm_picker: tk.Toplevel | None = None
         self.build_rsvp_tab(rsvp_tab)
         self.build_questions_tab(questions_tab)
         self.build_settings_tab(settings_tab)
+        notebook.bind("<<NotebookTabChanged>>", self.handle_tab_changed)
 
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(1, weight=1)
@@ -450,12 +451,21 @@ class FastReadingApp:
             relief="flat",
         )
         self.rsvp_progress_bar.grid(row=2, column=0, sticky="ew", padx=38, pady=(0, 22))
-        self.rsvp_progress_bar.grid_remove()
-        self.start_rsvp_playback()
+        self.show_rsvp_progress_bar()
+
+    def is_rsvp_tab_active(self) -> bool:
+        return self.notebook.tab(self.notebook.select(), "text") == "RSVP"
+
+    def handle_tab_changed(self, event: tk.Event | None = None) -> None:
+        if not self.is_rsvp_tab_active():
+            self.pause_rsvp_playback()
 
     def toggle_rsvp_fullscreen(self, event: tk.Event | None = None) -> str:
         if self.is_rsvp_fullscreen:
             return self.exit_rsvp_fullscreen(event)
+        if not self.is_rsvp_tab_active():
+            self.pause_rsvp_playback()
+            return "break"
         return self.enter_rsvp_fullscreen()
 
     def enter_rsvp_fullscreen(self) -> str:
@@ -608,6 +618,9 @@ class FastReadingApp:
         return letters[(len(letters) - 1) // 2]
 
     def start_rsvp_playback(self) -> None:
+        if not self.is_rsvp_tab_active():
+            self.pause_rsvp_playback()
+            return
         if self.rsvp_after_id is None:
             self.rsvp_after_id = self.root.after(self.get_rsvp_interval_ms(), self.advance_rsvp_word)
 
@@ -618,6 +631,9 @@ class FastReadingApp:
 
     def handle_rsvp_space(self, event: tk.Event) -> str | None:
         if event.widget == self.text_box:
+            return None
+        if not self.is_rsvp_tab_active():
+            self.pause_rsvp_playback()
             return None
         self.toggle_rsvp_playback()
         return "break"
@@ -735,6 +751,9 @@ class FastReadingApp:
             self.rsvp_wpm_picker.destroy()
 
     def toggle_rsvp_playback(self) -> None:
+        if not self.is_rsvp_tab_active():
+            self.pause_rsvp_playback()
+            return
         if self.rsvp_after_id is None:
             if self.rsvp_is_sentence_pause or self.rsvp_is_image_pause:
                 self.advance_rsvp_word_after_pause()
@@ -745,11 +764,14 @@ class FastReadingApp:
             self.hide_rsvp_progress_bar()
             self.start_rsvp_playback()
         else:
-            self.stop_rsvp_playback()
-            self.rsvp_is_sentence_pause = False
-            self.rsvp_is_image_pause = False
-            self.rsvp_is_paused.set(True)
-            self.show_rsvp_progress_bar()
+            self.pause_rsvp_playback()
+
+    def pause_rsvp_playback(self) -> None:
+        self.stop_rsvp_playback()
+        self.rsvp_is_sentence_pause = False
+        self.rsvp_is_image_pause = False
+        self.rsvp_is_paused.set(True)
+        self.show_rsvp_progress_bar()
 
     def show_rsvp_progress_bar(self) -> None:
         self.rsvp_progress_bar.configure(to=max(len(self.rsvp_words) - 1, 0))
@@ -773,6 +795,9 @@ class FastReadingApp:
 
     def advance_rsvp_word(self) -> None:
         self.rsvp_after_id = None
+        if not self.is_rsvp_tab_active():
+            self.pause_rsvp_playback()
+            return
         if self.should_pause_for_current_rsvp_image():
             self.start_rsvp_image_pause()
             return
@@ -783,6 +808,9 @@ class FastReadingApp:
 
     def advance_rsvp_word_after_pause(self) -> None:
         self.rsvp_after_id = None
+        if not self.is_rsvp_tab_active():
+            self.pause_rsvp_playback()
+            return
         self.rsvp_is_sentence_pause = False
         self.rsvp_is_image_pause = False
         self.rsvp_is_paused.set(False)
