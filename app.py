@@ -6,7 +6,7 @@ from io import BytesIO
 from pathlib import Path
 import re
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 from PIL import Image, ImageTk
 from pypdf import PdfReader
@@ -66,8 +66,14 @@ class FastReadingApp:
     def __init__(self, root: TkinterDnD.Tk) -> None:
         self.root = root
         self.root.title("FastReading")
-        self.root.geometry("900x650")
-        self.root.minsize(720, 480)
+        self.root.geometry("1100x760")
+        self.root.minsize(900, 620)
+
+        self.ui_font = tkfont.Font(family="Arial", size=12)
+        self.ui_bold_font = tkfont.Font(family="Arial", size=12, weight="bold")
+        self.ui_heading_font = tkfont.Font(family="Arial", size=18, weight="bold")
+        self.ui_text_font = tkfont.Font(family="Arial", size=13)
+        self.ui_wrap_labels: list[tk.Label | ttk.Label] = []
 
         self.status = tk.StringVar(value="Drop .txt or .pdf files into the field, or choose files manually.")
         self.is_editing = tk.BooleanVar(value=False)
@@ -99,6 +105,8 @@ class FastReadingApp:
         self.pdf_images: list[ImageTk.PhotoImage] = []
         self._build_layout()
         self._register_drop_target()
+        self.root.bind("<Configure>", self.update_responsive_layout, add="+")
+        self.update_responsive_layout()
 
     def _build_layout(self) -> None:
         self.is_rsvp_fullscreen = False
@@ -108,12 +116,19 @@ class FastReadingApp:
 
         notebook = ttk.Notebook(self.root)
         self.notebook = notebook
-        notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=18, pady=18)
+
+        style = ttk.Style(self.root)
+        style.configure(".", font=self.ui_font)
+        style.configure("TButton", padding=(14, 8))
+        style.configure("TCheckbutton", font=self.ui_font)
+        style.configure("TRadiobutton", font=self.ui_font)
+        style.configure("TLabelframe.Label", font=self.ui_bold_font)
 
         main_frame = ttk.Frame(notebook, padding=0)
         rsvp_tab = tk.Frame(notebook, bg="black")
-        questions_tab = ttk.Frame(notebook, padding=16)
-        settings_tab = ttk.Frame(notebook, padding=24)
+        questions_tab = ttk.Frame(notebook, padding=24)
+        settings_tab = ttk.Frame(notebook, padding=28)
         notebook.add(main_frame, text="FastReading Import")
         notebook.add(rsvp_tab, text="RSVP")
         notebook.add(questions_tab, text="Questions")
@@ -144,7 +159,7 @@ class FastReadingApp:
             anchor="center",
             justify="center",
             padding=28,
-            font=("Arial", 13),
+            font=self.ui_font,
         )
         drop_label.grid(row=0, column=0, sticky="ew")
 
@@ -193,7 +208,7 @@ class FastReadingApp:
         )
         edit_button.grid(row=0, column=3, sticky="e")
 
-        self.text_box = tk.Text(text_frame, wrap="word", undo=True, font=("Arial", 12))
+        self.text_box = tk.Text(text_frame, wrap="word", undo=True, font=self.ui_text_font)
         self.text_box.grid(row=1, column=0, sticky="nsew")
         for tag_name, color in self.highlight_tags.values():
             self.text_box.tag_configure(tag_name, background=color)
@@ -206,6 +221,29 @@ class FastReadingApp:
         status_label = ttk.Label(main_frame, textvariable=self.status, anchor="w")
         status_label.grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
+    def update_responsive_layout(self, event: tk.Event | None = None) -> None:
+        """Scale the UI up with the current window size instead of staying tiny."""
+        width = max(self.root.winfo_width(), self.root.winfo_reqwidth(), 1)
+        height = max(self.root.winfo_height(), self.root.winfo_reqheight(), 1)
+        scale = max(1.0, min(width / 1100, height / 760))
+        base_size = round(12 * scale)
+
+        self.ui_font.configure(size=base_size)
+        self.ui_bold_font.configure(size=base_size, weight="bold")
+        self.ui_heading_font.configure(size=round(18 * scale), weight="bold")
+        self.ui_text_font.configure(size=round(13 * scale))
+
+        style = ttk.Style(self.root)
+        style.configure(".", font=self.ui_font)
+        style.configure("TButton", padding=(round(14 * scale), round(8 * scale)))
+        style.configure("TCheckbutton", font=self.ui_font)
+        style.configure("TRadiobutton", font=self.ui_font)
+        style.configure("TLabelframe.Label", font=self.ui_bold_font)
+
+        wraplength = max(360, width - round(150 * scale))
+        for label in self.ui_wrap_labels:
+            if label.winfo_exists():
+                label.configure(wraplength=wraplength)
 
     def build_questions_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -237,24 +275,32 @@ class FastReadingApp:
         question_frame.rowconfigure(1, weight=1)
 
         self.question_status = tk.StringVar(value="No questions found in the inserted text.")
-        ttk.Label(question_frame, textvariable=self.question_status, wraplength=760, justify="left").grid(
-            row=0, column=0, sticky="ew", padx=12, pady=(12, 8)
-        )
+        question_status_label = ttk.Label(question_frame, textvariable=self.question_status, wraplength=760, justify="left", font=self.ui_font)
+        question_status_label.grid(row=0, column=0, sticky="ew", padx=18, pady=(18, 12))
+        self.ui_wrap_labels.append(question_status_label)
 
         self.question_prompt = tk.StringVar(value="")
-        ttk.Label(question_frame, textvariable=self.question_prompt, wraplength=760, justify="left", font=("Arial", 14, "bold")).grid(
-            row=1, column=0, sticky="new", padx=12, pady=(0, 8)
+        question_prompt_label = ttk.Label(
+            question_frame,
+            textvariable=self.question_prompt,
+            wraplength=760,
+            justify="left",
+            font=self.ui_heading_font,
         )
+        question_prompt_label.grid(row=1, column=0, sticky="new", padx=18, pady=(0, 14))
+        self.ui_wrap_labels.append(question_prompt_label)
 
         self.answers_frame = ttk.Frame(question_frame)
-        self.answers_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 8))
+        self.answers_frame.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 14))
         self.answers_frame.columnconfigure(0, weight=1)
 
         button_row = ttk.Frame(question_frame)
-        button_row.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 12))
+        button_row.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 18))
         button_row.columnconfigure(0, weight=1)
         self.question_feedback = tk.StringVar(value="")
-        ttk.Label(button_row, textvariable=self.question_feedback, wraplength=620, justify="left").grid(row=0, column=0, sticky="w")
+        question_feedback_label = ttk.Label(button_row, textvariable=self.question_feedback, wraplength=620, justify="left", font=self.ui_font)
+        question_feedback_label.grid(row=0, column=0, sticky="w")
+        self.ui_wrap_labels.append(question_feedback_label)
         ttk.Button(button_row, text="Weiter", command=self.advance_to_next_question).grid(row=0, column=1, sticky="e")
 
     def refresh_question_view(self) -> None:
@@ -323,7 +369,7 @@ class FastReadingApp:
             choice = tk.IntVar(value=0)
             self.current_question_choices.append(choice)
             ttk.Checkbutton(self.answers_frame, text=f"{row + 1}: {answer}", variable=choice).grid(
-                row=row, column=0, sticky="w", pady=3
+                row=row, column=0, sticky="w", pady=6
             )
 
     def check_current_question_answer(self) -> None:
@@ -338,8 +384,11 @@ class FastReadingApp:
 
     def build_settings_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
+        for row in range(3):
+            parent.rowconfigure(row, weight=1, uniform="settings_rows")
+
         pause_frame = ttk.LabelFrame(parent, text="Pause")
-        pause_frame.grid(row=0, column=0, sticky="ew")
+        pause_frame.grid(row=0, column=0, sticky="nsew")
         pause_frame.columnconfigure(0, weight=1)
 
         description = ttk.Label(
@@ -351,8 +400,10 @@ class FastReadingApp:
             ),
             wraplength=720,
             justify="left",
+            font=self.ui_font,
         )
-        description.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 8))
+        description.grid(row=0, column=0, sticky="ew", padx=18, pady=(18, 12))
+        self.ui_wrap_labels.append(description)
 
         options = [RSVP_MANUAL_SENTENCE_PAUSE, *RSVP_SENTENCE_PAUSE_DURATIONS_MS]
         for row, option in enumerate(options, start=1):
@@ -361,10 +412,10 @@ class FastReadingApp:
                 text=option,
                 value=option,
                 variable=self.rsvp_sentence_pause_mode,
-            ).grid(row=row, column=0, sticky="w", padx=12, pady=3)
+            ).grid(row=row, column=0, sticky="w", padx=18, pady=5)
 
         image_pause_frame = ttk.LabelFrame(parent, text="Image Pause")
-        image_pause_frame.grid(row=1, column=0, sticky="ew", pady=(18, 0))
+        image_pause_frame.grid(row=1, column=0, sticky="nsew", pady=(18, 0))
         image_pause_frame.columnconfigure(0, weight=1)
 
         image_pause_description = ttk.Label(
@@ -375,8 +426,10 @@ class FastReadingApp:
             ),
             wraplength=720,
             justify="left",
+            font=self.ui_font,
         )
-        image_pause_description.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 8))
+        image_pause_description.grid(row=0, column=0, sticky="ew", padx=18, pady=(18, 12))
+        self.ui_wrap_labels.append(image_pause_description)
 
         image_options = [RSVP_MANUAL_IMAGE_PAUSE, *RSVP_IMAGE_PAUSE_DURATIONS_MS]
         for row, option in enumerate(image_options, start=1):
@@ -385,10 +438,10 @@ class FastReadingApp:
                 text=option,
                 value=option,
                 variable=self.rsvp_image_pause_mode,
-            ).grid(row=row, column=0, sticky="w", padx=12, pady=3)
+            ).grid(row=row, column=0, sticky="w", padx=18, pady=5)
 
         long_word_frame = ttk.LabelFrame(parent, text="Duration long words")
-        long_word_frame.grid(row=2, column=0, sticky="ew", pady=(18, 0))
+        long_word_frame.grid(row=2, column=0, sticky="nsew", pady=(18, 0))
         long_word_frame.columnconfigure(1, weight=1)
 
         long_word_description = ttk.Label(
@@ -399,8 +452,10 @@ class FastReadingApp:
             ),
             wraplength=720,
             justify="left",
+            font=self.ui_font,
         )
-        long_word_description.grid(row=0, column=0, columnspan=3, sticky="ew", padx=12, pady=(12, 8))
+        long_word_description.grid(row=0, column=0, columnspan=3, sticky="ew", padx=18, pady=(18, 12))
+        self.ui_wrap_labels.append(long_word_description)
 
         ttk.Label(long_word_frame, text="From letters:").grid(row=1, column=0, sticky="w", padx=12, pady=6)
         min_length_spinbox = ttk.Spinbox(
