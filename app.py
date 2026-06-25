@@ -82,6 +82,7 @@ class FastReadingApp:
         self.question_mode = tk.StringVar(value="Chronological")
         self.questions: list[Question] = []
         self.current_question: Question | None = None
+        self.current_question_index = 0
         self.current_question_choices: list[tk.IntVar] = []
         self.rsvp_sentence_pause_flags: list[bool] = []
         self.rsvp_image_tokens: list[ImageTk.PhotoImage | None] = []
@@ -254,12 +255,13 @@ class FastReadingApp:
         button_row.columnconfigure(0, weight=1)
         self.question_feedback = tk.StringVar(value="")
         ttk.Label(button_row, textvariable=self.question_feedback, wraplength=620, justify="left").grid(row=0, column=0, sticky="w")
-        ttk.Button(button_row, text="Weiter", command=self.check_current_question_answer).grid(row=0, column=1, sticky="e")
+        ttk.Button(button_row, text="Weiter", command=self.advance_to_next_question).grid(row=0, column=1, sticky="e")
 
     def refresh_question_view(self) -> None:
         available_questions = self.get_available_questions()
         if not available_questions:
             self.current_question = None
+            self.current_question_index = 0
             self.question_prompt.set("")
             self.question_feedback.set("")
             self.question_status.set("No questions are available yet." if self.questions else "No questions found in the inserted text.")
@@ -267,13 +269,43 @@ class FastReadingApp:
             return
 
         if self.question_mode.get() == "Random":
-            self.current_question = random.choice(available_questions)
+            if self.current_question not in available_questions:
+                self.current_question = random.choice(available_questions)
         else:
-            self.current_question = available_questions[0]
+            if self.current_question in available_questions:
+                self.current_question_index = available_questions.index(self.current_question)
+            else:
+                self.current_question_index = min(self.current_question_index, len(available_questions) - 1)
+                self.current_question = available_questions[self.current_question_index]
+        self.show_current_question(available_questions)
+
+    def show_current_question(self, available_questions: list[Question] | None = None) -> None:
+        if self.current_question is None:
+            return
+        if available_questions is None:
+            available_questions = self.get_available_questions()
         self.question_status.set(f"{len(available_questions)} of {len(self.questions)} question(s) available.")
         self.question_prompt.set(self.current_question.prompt)
         self.question_feedback.set("")
         self.render_answer_widgets(self.current_question)
+
+    def advance_to_next_question(self) -> None:
+        available_questions = self.get_available_questions()
+        if not available_questions:
+            self.refresh_question_view()
+            return
+
+        if self.question_mode.get() == "Random":
+            next_questions = [
+                question for question in available_questions if question is not self.current_question
+            ]
+            self.current_question = random.choice(next_questions or available_questions)
+        else:
+            if self.current_question in available_questions:
+                self.current_question_index = available_questions.index(self.current_question)
+            self.current_question_index = (self.current_question_index + 1) % len(available_questions)
+            self.current_question = available_questions[self.current_question_index]
+        self.show_current_question(available_questions)
 
     def get_available_questions(self) -> list[Question]:
         if self.question_mode.get() == "Random":
