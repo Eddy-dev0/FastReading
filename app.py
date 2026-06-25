@@ -86,6 +86,9 @@ class FastReadingApp:
         self.rsvp_long_word_wpm_percent = tk.IntVar(value=DEFAULT_LONG_WORD_WPM_PERCENT)
         self.rsvp_long_word_wpm_label = tk.StringVar(value=self.format_long_word_wpm_label())
         self.question_mode = tk.StringVar(value="Chronological")
+        self.question_score = tk.StringVar(value="Right answers: 0/0")
+        self.correct_answer_count = 0
+        self.answered_question_ids: set[int] = set()
         self.questions: list[Question] = []
         self.current_question: Question | None = None
         self.current_question_index = 0
@@ -253,21 +256,22 @@ class FastReadingApp:
         toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         toolbar.columnconfigure(0, weight=1)
 
-        ttk.Label(toolbar, text="Question order:").grid(row=0, column=1, sticky="e", padx=(0, 8))
+        ttk.Label(toolbar, textvariable=self.question_score).grid(row=0, column=1, sticky="e", padx=(0, 28))
+        ttk.Label(toolbar, text="Question order:").grid(row=0, column=2, sticky="e", padx=(0, 8))
         ttk.Radiobutton(
             toolbar,
             text="Chronological",
             value="Chronological",
             variable=self.question_mode,
             command=self.refresh_question_view,
-        ).grid(row=0, column=2, sticky="e", padx=(0, 8))
+        ).grid(row=0, column=3, sticky="e", padx=(0, 8))
         ttk.Radiobutton(
             toolbar,
             text="Random",
             value="Random",
             variable=self.question_mode,
             command=self.refresh_question_view,
-        ).grid(row=0, column=3, sticky="e")
+        ).grid(row=0, column=4, sticky="e")
 
         question_frame = ttk.LabelFrame(parent, text="Questions")
         question_frame.grid(row=1, column=0, sticky="nsew")
@@ -303,7 +307,16 @@ class FastReadingApp:
         self.ui_wrap_labels.append(question_feedback_label)
         ttk.Button(button_row, text="Weiter", command=self.advance_to_next_question).grid(row=0, column=1, sticky="e")
 
+    def refresh_question_score(self) -> None:
+        self.question_score.set(f"Right answers: {self.correct_answer_count}/{len(self.questions)}")
+
+    def reset_question_score(self) -> None:
+        self.correct_answer_count = 0
+        self.answered_question_ids.clear()
+        self.refresh_question_score()
+
     def refresh_question_view(self) -> None:
+        self.refresh_question_score()
         available_questions = self.get_available_questions()
         if not available_questions:
             self.current_question = None
@@ -336,6 +349,7 @@ class FastReadingApp:
         self.render_answer_widgets(self.current_question)
 
     def advance_to_next_question(self) -> None:
+        self.check_current_question_answer()
         available_questions = self.get_available_questions()
         if not available_questions:
             self.refresh_question_view()
@@ -377,10 +391,16 @@ class FastReadingApp:
             return
         selected = [index for index, choice in enumerate(self.current_question_choices, start=1) if choice.get()]
         correct_answer = self.current_question.answers[self.current_question.correct_index - 1]
+        current_question_id = id(self.current_question)
         if selected == [self.current_question.correct_index]:
+            if current_question_id not in self.answered_question_ids:
+                self.correct_answer_count += 1
+                self.answered_question_ids.add(current_question_id)
             self.question_feedback.set(f"Correct. The correct answer is: {correct_answer}")
         else:
+            self.answered_question_ids.add(current_question_id)
             self.question_feedback.set(f"The correct answer is: {correct_answer}")
+        self.refresh_question_score()
 
     def build_settings_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -1116,6 +1136,7 @@ class FastReadingApp:
             self.questions = self.extract_questions(imported_text)
             self.rsvp_words, self.rsvp_sentence_pause_flags = self.build_rsvp_tokens(imported_text or RSVP_TEXT)
             self.rsvp_image_tokens = [None] * len(self.rsvp_words)
+        self.reset_question_score()
         self.rsvp_word_index = min(self.rsvp_word_index, max(len(self.rsvp_words) - 1, 0))
         self.rsvp_progress_bar.configure(to=max(len(self.rsvp_words) - 1, 0))
         self.rsvp_progress.set(self.rsvp_word_index)
