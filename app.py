@@ -41,6 +41,9 @@ DEFAULT_LONG_WORD_MIN_LENGTH = 8
 DEFAULT_LONG_WORD_WPM_PERCENT = 100
 MIN_LONG_WORD_WPM_PERCENT = 25
 MAX_LONG_WORD_WPM_PERCENT = 100
+DEFAULT_NUMBER_WPM_PERCENT = 100
+MIN_NUMBER_WPM_PERCENT = 25
+MAX_NUMBER_WPM_PERCENT = 100
 
 @dataclass
 class Question:
@@ -85,14 +88,19 @@ class FastReadingApp:
         self.rsvp_long_word_min_length = tk.IntVar(value=DEFAULT_LONG_WORD_MIN_LENGTH)
         self.rsvp_long_word_wpm_percent = tk.IntVar(value=DEFAULT_LONG_WORD_WPM_PERCENT)
         self.rsvp_long_word_wpm_label = tk.StringVar(value=self.format_long_word_wpm_label())
+        self.rsvp_number_wpm_percent = tk.IntVar(value=DEFAULT_NUMBER_WPM_PERCENT)
+        self.rsvp_number_wpm_label = tk.StringVar(value=self.format_number_wpm_label())
         self.question_mode = tk.StringVar(value="Chronological")
         self.question_score = tk.StringVar(value="Right answers: 0/0")
         self.correct_answer_count = 0
         self.answered_question_ids: set[int] = set()
+        self.question_answer_results: dict[int, bool] = {}
+        self.question_answer_selections: dict[int, list[int]] = {}
         self.questions: list[Question] = []
         self.current_question: Question | None = None
         self.current_question_index = 0
         self.current_question_choices: list[tk.IntVar] = []
+        self.question_review_panel: ttk.Frame | None = None
         self.rsvp_sentence_pause_flags: list[bool] = []
         self.rsvp_image_tokens: list[ImageTk.PhotoImage | None] = []
         self.rsvp_source_parts: list[DocumentPart] = []
@@ -303,9 +311,11 @@ class FastReadingApp:
         button_row.columnconfigure(0, weight=1)
         self.question_feedback = tk.StringVar(value="")
         question_feedback_label = ttk.Label(button_row, textvariable=self.question_feedback, wraplength=620, justify="left", font=self.ui_font)
-        question_feedback_label.grid(row=0, column=0, sticky="w")
+        question_feedback_label.grid(row=0, column=2, sticky="w")
         self.ui_wrap_labels.append(question_feedback_label)
-        ttk.Button(button_row, text="Weiter", command=self.advance_to_next_question).grid(row=0, column=1, sticky="e")
+        ttk.Button(button_row, text="Back", command=self.go_to_previous_question).grid(row=0, column=0, sticky="w")
+        ttk.Button(button_row, text="!", width=3, command=self.toggle_question_review_panel).grid(row=0, column=1, sticky="w", padx=(18, 18))
+        ttk.Button(button_row, text="Next", command=self.advance_to_next_question).grid(row=0, column=3, sticky="e")
 
     def refresh_question_score(self) -> None:
         self.question_score.set(f"Right answers: {self.correct_answer_count}/{len(self.questions)}")
@@ -313,7 +323,10 @@ class FastReadingApp:
     def reset_question_score(self) -> None:
         self.correct_answer_count = 0
         self.answered_question_ids.clear()
+        self.question_answer_results.clear()
+        self.question_answer_selections.clear()
         self.refresh_question_score()
+        self.update_question_review_panel()
 
     def refresh_question_view(self) -> None:
         self.refresh_question_score()
@@ -367,6 +380,52 @@ class FastReadingApp:
             self.current_question = available_questions[self.current_question_index]
         self.show_current_question(available_questions)
 
+    def go_to_previous_question(self) -> None:
+        self.remember_current_question_selection()
+        available_questions = self.get_available_questions()
+        if not available_questions:
+            self.refresh_question_view()
+            return
+
+        if self.question_mode.get() == "Random":
+            previous_questions = [
+                question for question in available_questions if question is not self.current_question
+            ]
+            self.current_question = random.choice(previous_questions or available_questions)
+        else:
+            if self.current_question in available_questions:
+                self.current_question_index = available_questions.index(self.current_question)
+            self.current_question_index = (self.current_question_index - 1) % len(available_questions)
+            self.current_question = available_questions[self.current_question_index]
+        self.show_current_question(available_questions)
+
+    def toggle_question_review_panel(self) -> None:
+        if self.question_review_panel is not None and self.question_review_panel.winfo_exists():
+            self.question_review_panel.destroy()
+            self.question_review_panel = None
+            return
+
+        parent = self.answers_frame.master
+        panel = ttk.Frame(parent, borderwidth=2, relief="ridge", padding=12)
+        self.question_review_panel = panel
+        panel.place(relx=0, rely=0, relwidth=0.44, relheight=1.0)
+        ttk.Label(panel, text="Question overview", font=self.ui_bold_font).pack(anchor="w", pady=(0, 8))
+        ttk.Button(panel, text="Close", command=self.toggle_question_review_panel).pack(anchor="e", pady=(0, 8))
+        self.update_question_review_panel()
+
+    def update_question_review_panel(self) -> None:
+        if self.question_review_panel is None or not self.question_review_panel.winfo_exists():
+            return
+        for child in self.question_review_panel.winfo_children()[2:]:
+            child.destroy()
+        if not self.questions:
+            ttk.Label(self.question_review_panel, text="No questions found.", font=self.ui_font).pack(anchor="w")
+            return
+        for index, question in enumerate(self.questions, start=1):
+            result = self.question_answer_results.get(id(question))
+            icon = "⭕" if result is None else ("✅" if result else "❌")
+            ttk.Label(self.question_review_panel, text=f"Frage {index}: {icon}", font=self.ui_font).pack(anchor="w", pady=3)
+
     def get_available_questions(self) -> list[Question]:
         if self.question_mode.get() == "Random":
             return self.questions
@@ -380,31 +439,46 @@ class FastReadingApp:
     def render_answer_widgets(self, question: Question) -> None:
         self.clear_answer_widgets()
         for row, answer in enumerate(question.answers):
-            choice = tk.IntVar(value=0)
+            question_id = id(question)
+            choice = tk.IntVar(value=1 if row + 1 in self.question_answer_selections.get(question_id, []) else 0)
             self.current_question_choices.append(choice)
             ttk.Checkbutton(self.answers_frame, text=f"{row + 1}: {answer}", variable=choice).grid(
                 row=row, column=0, sticky="w", pady=6
             )
 
+    def remember_current_question_selection(self) -> list[int]:
+        if self.current_question is None:
+            return []
+        selected = [index for index, choice in enumerate(self.current_question_choices, start=1) if choice.get()]
+        self.question_answer_selections[id(self.current_question)] = selected
+        return selected
+
     def check_current_question_answer(self) -> None:
         if self.current_question is None:
             return
-        selected = [index for index, choice in enumerate(self.current_question_choices, start=1) if choice.get()]
+        selected = self.remember_current_question_selection()
         correct_answer = self.current_question.answers[self.current_question.correct_index - 1]
         current_question_id = id(self.current_question)
+        if not selected:
+            self.question_feedback.set("No answer selected yet.")
+            self.update_question_review_panel()
+            return
         if selected == [self.current_question.correct_index]:
             if current_question_id not in self.answered_question_ids:
                 self.correct_answer_count += 1
                 self.answered_question_ids.add(current_question_id)
+            self.question_answer_results[current_question_id] = True
             self.question_feedback.set(f"Correct. The correct answer is: {correct_answer}")
         else:
             self.answered_question_ids.add(current_question_id)
+            self.question_answer_results[current_question_id] = False
             self.question_feedback.set(f"The correct answer is: {correct_answer}")
         self.refresh_question_score()
+        self.update_question_review_panel()
 
     def build_settings_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
-        for row in range(3):
+        for row in range(4):
             parent.rowconfigure(row, weight=1, uniform="settings_rows")
 
         pause_frame = ttk.LabelFrame(parent, text="Pause")
@@ -505,6 +579,36 @@ class FastReadingApp:
             sticky="e",
             padx=12,
             pady=(6, 12),
+        )
+
+        number_frame = ttk.LabelFrame(parent, text="Duration numbers")
+        number_frame.grid(row=3, column=0, sticky="nsew", pady=(18, 0))
+        number_frame.columnconfigure(1, weight=1)
+
+        number_description = ttk.Label(
+            number_frame,
+            text=(
+                "Slow down tokens that contain numbers. "
+                "100% keeps them at the normal RSVP wpm; lower percentages display them longer."
+            ),
+            wraplength=720,
+            justify="left",
+            font=self.ui_font,
+        )
+        number_description.grid(row=0, column=0, columnspan=3, sticky="ew", padx=18, pady=(18, 12))
+        self.ui_wrap_labels.append(number_description)
+
+        ttk.Label(number_frame, text="Number speed:").grid(row=1, column=0, sticky="w", padx=12, pady=(6, 12))
+        number_speed_slider = ttk.Scale(
+            number_frame,
+            from_=MIN_NUMBER_WPM_PERCENT,
+            to=MAX_NUMBER_WPM_PERCENT,
+            variable=self.rsvp_number_wpm_percent,
+            command=self.handle_number_settings_changed,
+        )
+        number_speed_slider.grid(row=1, column=1, sticky="ew", padx=12, pady=(6, 12))
+        ttk.Label(number_frame, textvariable=self.rsvp_number_wpm_label, width=18).grid(
+            row=1, column=2, sticky="e", padx=12, pady=(6, 12)
         )
 
     def build_rsvp_tab(self, parent: tk.Frame) -> None:
@@ -687,11 +791,9 @@ class FastReadingApp:
         pivot_char = word[pivot : pivot + 1]
         after = word[pivot + 1 :]
 
-        font = ("Times New Roman", round(RSVP_BASE_FONT_SIZE * scale))
-        pivot_probe = canvas.create_text(-10_000, -10_000, text=pivot_char, font=font, anchor="nw", fill="black")
-        pivot_bbox = canvas.bbox(pivot_probe)
-        canvas.delete(pivot_probe)
-        pivot_width = (pivot_bbox[2] - pivot_bbox[0]) if pivot_bbox else 0
+        font_size = self.get_rsvp_font_size_for_word(canvas, word, before, pivot_char, after, word_x, width, scale)
+        font = ("Times New Roman", font_size)
+        pivot_width = self.measure_canvas_text_width(canvas, pivot_char, font)
         pivot_left_x = word_x - (pivot_width / 2)
 
         canvas.create_text(pivot_left_x, word_y, text=before, fill="white", font=font, anchor="e")
@@ -699,6 +801,40 @@ class FastReadingApp:
         pivot_bbox = canvas.bbox(pivot_item)
         after_x = pivot_bbox[2] if pivot_bbox else pivot_left_x
         canvas.create_text(after_x, word_y, text=after, fill="white", font=font, anchor="w")
+
+    def get_rsvp_font_size_for_word(
+        self,
+        canvas: tk.Canvas,
+        word: str,
+        before: str,
+        pivot_char: str,
+        after: str,
+        word_x: float,
+        canvas_width: int,
+        scale: float,
+    ) -> int:
+        base_size = round(RSVP_BASE_FONT_SIZE * scale)
+        if self.get_rsvp_letter_count(word) <= DEFAULT_LONG_WORD_MIN_LENGTH and len(word) < 14:
+            return base_size
+
+        horizontal_padding = max(24, round(24 * scale))
+        left_space = max(1, word_x - horizontal_padding)
+        right_space = max(1, canvas_width - word_x - horizontal_padding)
+        for size in range(base_size, 11, -1):
+            font = ("Times New Roman", size)
+            pivot_width = self.measure_canvas_text_width(canvas, pivot_char, font)
+            before_width = self.measure_canvas_text_width(canvas, before, font)
+            after_width = self.measure_canvas_text_width(canvas, after, font)
+            if before_width + (pivot_width / 2) <= left_space and after_width + (pivot_width / 2) <= right_space:
+                return size
+        return 12
+
+    @staticmethod
+    def measure_canvas_text_width(canvas: tk.Canvas, text: str, font: tuple[str, int]) -> int:
+        probe = canvas.create_text(-10_000, -10_000, text=text, font=font, anchor="nw", fill="black")
+        bbox = canvas.bbox(probe)
+        canvas.delete(probe)
+        return (bbox[2] - bbox[0]) if bbox else 0
 
     def get_rsvp_visual_offset(self) -> tuple[float, float]:
         if self.is_rsvp_fullscreen and self.rsvp_fullscreen_visual_offset is not None:
@@ -720,9 +856,12 @@ class FastReadingApp:
     @staticmethod
     def get_rsvp_pivot_index(word: str) -> int:
         letters = [index for index, character in enumerate(word) if character.isalpha()]
-        if not letters:
-            return 0
-        return letters[(len(letters) - 1) // 2]
+        if letters:
+            return letters[(len(letters) - 1) // 2]
+        digits = [index for index, character in enumerate(word) if character.isdigit()]
+        if digits:
+            return digits[(len(digits) - 1) // 2]
+        return 0
 
     def start_rsvp_playback(self) -> None:
         if not self.is_rsvp_tab_active():
@@ -756,24 +895,40 @@ class FastReadingApp:
             return base_wpm
 
         current_word = self.rsvp_words[self.rsvp_word_index % len(self.rsvp_words)]
-        if self.get_rsvp_letter_count(current_word) < self.rsvp_long_word_min_length.get():
-            return base_wpm
-
-        percent = max(
-            MIN_LONG_WORD_WPM_PERCENT,
-            min(MAX_LONG_WORD_WPM_PERCENT, self.rsvp_long_word_wpm_percent.get()),
-        )
-        return max(1, round(base_wpm * (percent / 100)))
+        speed_percent = 100
+        if self.get_rsvp_digit_count(current_word) > 0:
+            speed_percent = min(speed_percent, self.get_number_wpm_percent())
+        if self.get_rsvp_letter_count(current_word) >= self.rsvp_long_word_min_length.get():
+            speed_percent = min(speed_percent, self.get_long_word_wpm_percent())
+        return max(1, round(base_wpm * (speed_percent / 100)))
 
     @staticmethod
     def get_rsvp_letter_count(word: str) -> int:
         return sum(1 for character in word if character.isalpha())
 
-    def format_long_word_wpm_label(self) -> str:
-        percent = max(
+    @staticmethod
+    def get_rsvp_digit_count(word: str) -> int:
+        return sum(1 for character in word if character.isdigit())
+
+    def get_long_word_wpm_percent(self) -> int:
+        return max(
             MIN_LONG_WORD_WPM_PERCENT,
-            min(MAX_LONG_WORD_WPM_PERCENT, self.rsvp_long_word_wpm_percent.get()),
+            min(MAX_LONG_WORD_WPM_PERCENT, round(self.rsvp_long_word_wpm_percent.get())),
         )
+
+    def get_number_wpm_percent(self) -> int:
+        return max(
+            MIN_NUMBER_WPM_PERCENT,
+            min(MAX_NUMBER_WPM_PERCENT, round(self.rsvp_number_wpm_percent.get())),
+        )
+
+    def format_long_word_wpm_label(self) -> str:
+        percent = self.get_long_word_wpm_percent()
+        effective_wpm = max(1, round(self.rsvp_wpm.get() * (percent / 100)))
+        return f"{percent}% ({effective_wpm} wpm)"
+
+    def format_number_wpm_label(self) -> str:
+        percent = self.get_number_wpm_percent()
         effective_wpm = max(1, round(self.rsvp_wpm.get() * (percent / 100)))
         return f"{percent}% ({effective_wpm} wpm)"
 
@@ -783,13 +938,16 @@ class FastReadingApp:
         except (tk.TclError, ValueError):
             min_length = DEFAULT_LONG_WORD_MIN_LENGTH
         self.rsvp_long_word_min_length.set(max(1, min(40, min_length)))
-        self.rsvp_long_word_wpm_percent.set(
-            max(
-                MIN_LONG_WORD_WPM_PERCENT,
-                min(MAX_LONG_WORD_WPM_PERCENT, round(self.rsvp_long_word_wpm_percent.get())),
-            )
-        )
+        self.rsvp_long_word_wpm_percent.set(self.get_long_word_wpm_percent())
         self.rsvp_long_word_wpm_label.set(self.format_long_word_wpm_label())
+        self.rsvp_number_wpm_label.set(self.format_number_wpm_label())
+        if self.rsvp_after_id is not None:
+            self.stop_rsvp_playback()
+            self.start_rsvp_playback()
+
+    def handle_number_settings_changed(self, event: tk.Event | str | None = None) -> None:
+        self.rsvp_number_wpm_percent.set(self.get_number_wpm_percent())
+        self.rsvp_number_wpm_label.set(self.format_number_wpm_label())
         if self.rsvp_after_id is not None:
             self.stop_rsvp_playback()
             self.start_rsvp_playback()
@@ -805,6 +963,7 @@ class FastReadingApp:
         self.rsvp_wpm.set(new_value)
         self.rsvp_wpm_label.configure(text=f"{new_value} wpm")
         self.rsvp_long_word_wpm_label.set(self.format_long_word_wpm_label())
+        self.rsvp_number_wpm_label.set(self.format_number_wpm_label())
         if self.rsvp_after_id is not None:
             self.stop_rsvp_playback()
             self.start_rsvp_playback()
