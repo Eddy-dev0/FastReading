@@ -101,6 +101,7 @@ class FastReadingApp:
         self.current_question_index = 0
         self.current_question_choices: list[tk.IntVar] = []
         self.question_review_panel: ttk.Frame | None = None
+        self.question_review_list_frame: ttk.Frame | None = None
         self.rsvp_sentence_pause_flags: list[bool] = []
         self.rsvp_image_tokens: list[ImageTk.PhotoImage | None] = []
         self.rsvp_source_parts: list[DocumentPart] = []
@@ -356,7 +357,11 @@ class FastReadingApp:
             return
         if available_questions is None:
             available_questions = self.get_available_questions()
-        self.question_status.set(f"{len(available_questions)} of {len(self.questions)} question(s) available.")
+        current_question_number = self.questions.index(self.current_question) + 1
+        self.question_status.set(
+            f"Frage {current_question_number} von {len(self.questions)} ist aktuell dran. "
+            f"{len(available_questions)} of {len(self.questions)} question(s) available."
+        )
         self.question_prompt.set(self.current_question.prompt)
         self.question_feedback.set("")
         self.render_answer_widgets(self.current_question)
@@ -403,28 +408,57 @@ class FastReadingApp:
         if self.question_review_panel is not None and self.question_review_panel.winfo_exists():
             self.question_review_panel.destroy()
             self.question_review_panel = None
+            self.question_review_list_frame = None
             return
 
         parent = self.answers_frame.master
         panel = ttk.Frame(parent, borderwidth=2, relief="ridge", padding=12)
         self.question_review_panel = panel
         panel.place(relx=0, rely=0, relwidth=0.44, relheight=1.0)
-        ttk.Label(panel, text="Question overview", font=self.ui_bold_font).pack(anchor="w", pady=(0, 8))
-        ttk.Button(panel, text="Close", command=self.toggle_question_review_panel).pack(anchor="e", pady=(0, 8))
+        panel.columnconfigure(0, weight=1)
+        panel.rowconfigure(2, weight=1)
+
+        ttk.Label(panel, text="Question overview", font=self.ui_bold_font).grid(row=0, column=0, sticky="w", pady=(0, 8))
+        ttk.Button(panel, text="Close", command=self.toggle_question_review_panel).grid(row=1, column=0, sticky="e", pady=(0, 8))
+
+        list_container = ttk.Frame(panel)
+        list_container.grid(row=2, column=0, sticky="nsew")
+        list_container.columnconfigure(0, weight=1)
+        list_container.rowconfigure(0, weight=1)
+
+        canvas = tk.Canvas(list_container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=canvas.yview)
+        self.question_review_list_frame = ttk.Frame(canvas)
+        window_id = canvas.create_window((0, 0), window=self.question_review_list_frame, anchor="nw")
+
+        def update_scroll_region(event: tk.Event) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def update_list_width(event: tk.Event) -> None:
+            canvas.itemconfigure(window_id, width=event.width)
+
+        self.question_review_list_frame.bind("<Configure>", update_scroll_region)
+        canvas.bind("<Configure>", update_list_width)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
         self.update_question_review_panel()
 
     def update_question_review_panel(self) -> None:
         if self.question_review_panel is None or not self.question_review_panel.winfo_exists():
             return
-        for child in self.question_review_panel.winfo_children()[2:]:
+        if self.question_review_list_frame is None or not self.question_review_list_frame.winfo_exists():
+            return
+        for child in self.question_review_list_frame.winfo_children():
             child.destroy()
         if not self.questions:
-            ttk.Label(self.question_review_panel, text="No questions found.", font=self.ui_font).pack(anchor="w")
+            ttk.Label(self.question_review_list_frame, text="No questions found.", font=self.ui_font).pack(anchor="w")
             return
         for index, question in enumerate(self.questions, start=1):
             result = self.question_answer_results.get(id(question))
             icon = "⭕" if result is None else ("✅" if result else "❌")
-            ttk.Label(self.question_review_panel, text=f"Frage {index}: {icon}", font=self.ui_font).pack(anchor="w", pady=3)
+            ttk.Label(self.question_review_list_frame, text=f"Frage {index}: {icon}", font=self.ui_font).pack(anchor="w", pady=3)
 
     def get_available_questions(self) -> list[Question]:
         if self.question_mode.get() == "Random":
