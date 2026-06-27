@@ -152,7 +152,6 @@ class FastReadingApp:
         self.rsvp_after_id: str | None = None
         self.rsvp_is_paused = tk.BooleanVar(value=True)
         self.rsvp_progress = tk.IntVar(value=0)
-        self.rsvp_wpm_picker: tk.Toplevel | None = None
         self.build_rsvp_tab(rsvp_tab)
         self.build_questions_tab(questions_tab)
         self.build_settings_tab(settings_tab)
@@ -359,7 +358,7 @@ class FastReadingApp:
             available_questions = self.get_available_questions()
         current_question_number = self.questions.index(self.current_question) + 1
         self.question_status.set(
-            f"Frage {current_question_number} von {len(self.questions)} ist aktuell dran. "
+            f"Question {current_question_number} of {len(self.questions)} is currently active. "
             f"{len(available_questions)} of {len(self.questions)} question(s) available."
         )
         self.question_prompt.set(self.current_question.prompt)
@@ -458,7 +457,7 @@ class FastReadingApp:
         for index, question in enumerate(self.questions, start=1):
             result = self.question_answer_results.get(id(question))
             icon = "⭕" if result is None else ("✅" if result else "❌")
-            ttk.Label(self.question_review_list_frame, text=f"Frage {index}: {icon}", font=self.ui_font).pack(anchor="w", pady=3)
+            ttk.Label(self.question_review_list_frame, text=f"Question {index}: {icon}", font=self.ui_font).pack(anchor="w", pady=3)
 
     def get_available_questions(self) -> list[Question]:
         if self.question_mode.get() == "Random":
@@ -674,8 +673,7 @@ class FastReadingApp:
             font=("Arial", 24, "italic"),
         )
         self.rsvp_wpm_label.grid(row=0, column=1, sticky="e", padx=(0, 32))
-        self.rsvp_wpm_label.bind("<Button-1>", self.open_rsvp_wpm_picker)
-        self.rsvp_wpm_label.configure(cursor="hand2")
+        self.rsvp_wpm_label.configure(cursor="")
 
         self.rsvp_progress_bar = tk.Scale(
             parent,
@@ -740,8 +738,7 @@ class FastReadingApp:
             font=("Arial", 24, "italic"),
         )
         self.rsvp_wpm_label.grid(row=0, column=1, sticky="e", padx=(0, 32))
-        self.rsvp_wpm_label.bind("<Button-1>", self.open_rsvp_wpm_picker)
-        self.rsvp_wpm_label.configure(cursor="hand2")
+        self.rsvp_wpm_label.configure(cursor="")
 
         self.rsvp_progress_bar = tk.Scale(
             fullscreen_frame,
@@ -1001,54 +998,6 @@ class FastReadingApp:
         if self.rsvp_after_id is not None:
             self.stop_rsvp_playback()
             self.start_rsvp_playback()
-
-    def open_rsvp_wpm_picker(self, event: tk.Event | None = None) -> None:
-        if self.rsvp_wpm_picker is not None and self.rsvp_wpm_picker.winfo_exists():
-            self.rsvp_wpm_picker.lift()
-            return
-
-        picker = tk.Toplevel(self.root)
-        self.rsvp_wpm_picker = picker
-        picker.title("WPM")
-        picker.configure(bg="black")
-        picker.resizable(False, False)
-        picker.transient(self.root)
-        picker.overrideredirect(True)
-
-        width = 150
-        item_height = 44
-        height = item_height * len(RSVP_WPM_PRESETS)
-        x = self.rsvp_wpm_label.winfo_rootx() + self.rsvp_wpm_label.winfo_width() - width
-        y = self.rsvp_wpm_label.winfo_rooty() - height - 10
-        picker.geometry(f"{width}x{height}+{x}+{max(y, 0)}")
-
-        for preset in sorted(RSVP_WPM_PRESETS, reverse=True):
-            preset_button = tk.Button(
-                picker,
-                text=f"{preset} wpm",
-                font=("Arial", 24, "italic"),
-                fg="#4a4a4a" if preset != self.rsvp_wpm.get() else "white",
-                bg="black",
-                activeforeground="white",
-                activebackground="#151515",
-                bd=0,
-                highlightthickness=0,
-                relief="flat",
-                command=lambda selected=preset: self.choose_rsvp_wpm(selected),
-            )
-            preset_button.pack(fill="x", ipady=2)
-
-        picker.bind("<Up>", lambda key_event: self.change_rsvp_wpm(25))
-        picker.bind("<Right>", lambda key_event: self.change_rsvp_wpm(25))
-        picker.bind("<Down>", lambda key_event: self.change_rsvp_wpm(-25))
-        picker.bind("<Left>", lambda key_event: self.change_rsvp_wpm(-25))
-        picker.bind("<Escape>", lambda key_event: picker.destroy())
-        picker.protocol("WM_DELETE_WINDOW", picker.destroy)
-
-    def choose_rsvp_wpm(self, value: int) -> None:
-        self.set_rsvp_wpm(value)
-        if self.rsvp_wpm_picker is not None and self.rsvp_wpm_picker.winfo_exists():
-            self.rsvp_wpm_picker.destroy()
 
     def toggle_rsvp_playback(self) -> None:
         if not self.is_rsvp_tab_active():

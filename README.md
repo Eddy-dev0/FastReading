@@ -1,6 +1,10 @@
 # FastReading
 
-FastReading is a small Tkinter application for importing `.txt` and `.pdf` files by drag and drop or by file picker. Extracted text is shown in the reading box below the import area. The box is read-only by default; use the **EDIT** button to switch editing on and reveal extra editing tools.
+FastReading is a small desktop app for importing `.txt` and `.pdf` files, reviewing the extracted text, and reading it with RSVP. The app is built with Tkinter and supports drag and drop, manual file selection, inline PDF images, text highlighting, RSVP playback, and embedded multiple-choice questions.
+
+## What RSVP means
+
+RSVP stands for **Rapid Serial Visual Presentation**. Instead of showing a full paragraph, RSVP displays one word at a time at a fixed point on the screen. FastReading highlights the word's pivot character in red so your eyes can stay near the same position while the words change. This can reduce eye movement and help you practice faster reading, while the pause settings still let you slow down at sentence endings, images, long words, or numbers.
 
 ## Installation
 
@@ -23,13 +27,39 @@ python app.py
 1. Start the application.
 2. Drag one or more `.txt` or `.pdf` files into the drag-and-drop area.
 3. Alternatively, open files with **Choose files**.
-4. Recognized text appears in the inserted-text box in protected view mode.
+4. Recognized text appears in the **Inserted Text** box in protected view mode.
 5. Click **EDIT** to edit the text. The **Mark** button and color picker appear next to it.
 6. Choose a highlight color, select text, and click **Mark** to highlight only letters. Spaces, numbers, punctuation, line gaps, and other non-letter characters stay unmarked, so no large color blocks appear between words or lines. Select an already highlighted area and click **Mark** again to remove that highlight.
-7. Use the top tabs to switch between **FastReading Import**, **RSVP**, **Questions**, and **Settings**. The interface expands with the window size so the content remains readable in fullscreen and large windows.
-8. The **RSVP** tab reads the current text from **FastReading Import** one word at a time on a black background with dark guide lines, a centered red pivot letter, and a 300 wpm indicator. The pivot is the middle letter; for words with an even number of letters, the pivot is rounded down to the left middle letter. Click the wpm indicator to open a clean upward wpm picker. Use arrow keys to adjust the speed by 25 wpm. RSVP starts paused, can only be resumed while the RSVP tab is active, and pauses automatically when you switch away from that tab. Press Space to play or pause and reveal the green seek bar for scrubbing through the current text.
-9. Imported PDF images are displayed inline in the inserted-text box when they can be extracted from the PDF.
-10. Open **Settings** to choose sentence-ending pauses for RSVP: wait until Space is pressed, or pause automatically for 1, 2, 5, or 10 seconds. Sentence endings are detected after `.`, `?`, or `!` when the next non-space character is uppercase.
-11. In **Settings**, use **Image Pause** to choose how long RSVP shows imported PDF images at the pivot: pause for 1, 5, or 10 seconds, or wait until Space is pressed.
-12. In **Settings**, use **Duration long words** to choose the minimum word length and the percentage speed for those long words. At 100%, long words use the normal wpm. Below 100%, long words are displayed longer; for example, 50% at 300 wpm displays matching long words at 150 wpm.
-13. Click **DONE** to return to protected view mode.
+7. Use the top tabs to switch between **FastReading Import**, **RSVP**, **Questions**, and **Settings**.
+8. Open the **RSVP** tab to read the current imported text one word at a time on a black background. The red character is the pivot character; for words with an even number of letters, the pivot is rounded down to the left middle letter.
+9. Press **Space** to play or pause RSVP playback. When playback is paused, use the green seek bar to scrub through the current text.
+10. Change the RSVP speed only with the keyboard:
+    - **Right Arrow** or **Up Arrow**: increase speed by 25 wpm.
+    - **Left Arrow** or **Down Arrow**: decrease speed by 25 wpm.
+11. Press **F** while the RSVP tab is active to enter fullscreen mode. Press **Escape** to leave fullscreen mode.
+12. Imported PDF images are displayed inline in the inserted-text box when they can be extracted from the PDF. RSVP can also pause on imported images.
+13. Open **Settings** to configure sentence-ending pauses, image pauses, long-word speed, and number speed.
+14. Click **DONE** to return to protected view mode after editing.
+
+## Adding questions with ChatGPT
+
+FastReading can detect embedded multiple-choice questions when they use this format:
+
+```text
+?([(Question text) 1: First answer, 2: Second answer, 3: Third answer] 2)?
+```
+
+The number after the closing bracket is the correct answer number. You can paste these question blocks directly into your imported text. RSVP hides the question blocks while reading, and the **Questions** tab makes questions available as you reach their position in the text.
+
+To generate useful questions with ChatGPT, append this prompt to the text you want to prepare:
+
+```text
+Create concise multiple-choice comprehension questions for this text. Insert each question directly after the relevant paragraph using exactly this format: ?([(Question text) 1: First answer, 2: Second answer, 3: Third answer, 4: Fourth answer] correct_number)?. Use English only. Make one answer clearly correct, make the distractors plausible, and set correct_number to the number of the correct answer. Do not change the original text except for inserting the question blocks.
+```
+
+## Question format example
+
+```text
+RSVP shows one word at a time so the reader can focus on a stable visual point.
+?([(What does RSVP show during playback?) 1: One word at a time, 2: A full book page, 3: Only images, 4: A list of settings] 1)?
+```
